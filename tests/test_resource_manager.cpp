@@ -2763,7 +2763,17 @@ void test_guided_pressure_reaches_deep_retention_before_maximal_fallback() {
                           2000U + owner_id) == program.started_action_ids.end(),
                 "guided pressure search evicted a parked owner");
     }
-    require(program.pressure_target_assessments <= 8,
+    // The bound was 8 while the planner's search ceiling was a flat 5 ms. At the 2 ms
+    // assessment delay injected above that ceiling stopped the search after ~3 targets, so the
+    // old bound measured CLOCK TRUNCATION, not guidance - and the same truncation is what made
+    // a resumed 190k session evict its whole catalog and re-prefill for 165 s in production
+    // (2026-09-01, 2026-09-02). With the ceiling sized from measurement the search now
+    // converges here on its own at 18 assessments, out of the ~29 this fixture can offer
+    // (7 owners x 4 alternatives, plus root). 20 keeps the assertion meaningfully below eager
+    // breadth-first while letting the search finish. The three assertions above - that a plan
+    // is found, that it is a retention closure rather than maximal release, and that no parked
+    // owner is evicted - are the behavioral ones, and they held unchanged across this move.
+    require(program.pressure_target_assessments <= 20,
             "guided pressure search returned to eager breadth-first assessment");
 }
 

@@ -254,8 +254,29 @@ public:
         }
 
         const Clock::time_point search_started = Clock::now();
+        // Spend at most 5% of the incumbent's own predicted cost looking for something
+        // better, under a ceiling. The proportional term is what makes this safe: a cheap
+        // request gets a correspondingly tiny search, and the loop exits early on
+        // QueueExhausted or ValueOfNextExpansion rather than burning the budget it is given.
+        //
+        // The ceiling used to be 5 ms, which meant it bound for any incumbent past 100 ms -
+        // in other words, always. At long context the effect was severe: a resumed 190k
+        // session priced its incumbent at 185 s, so the proportional term offered 9.25 s of
+        // search and the ceiling cut it to 5 ms, 1850x less. The search assessed 5 of a
+        // permitted kTargetBudget=4096 targets, stopped on TimeBudget, and took the maximal
+        // fallback - evicting the whole catalog and re-prefilling 190k tokens for 165 s.
+        // Measured in production 2026-09-01 and 09-02, twice each on the first turns after a
+        // resume, and confirmed against pi's own client-side transcript.
+        //
+        // 50 ms is sized from measurement, not from the catastrophe. Target assessment costs
+        // roughly 1 ms at long context (production assessed 5 targets in its 5 ms), and
+        // test_guided_pressure_reaches_deep_retention_before_maximal_fallback shows the search
+        // CONVERGING at 18 assessments in a 7-owner, 4-alternative scenario rather than running
+        // to its ceiling. So ~20 assessments is what the search actually wants, 50 ms buys 2.5x
+        // that, and convergence - not the clock - is what bounds the work in the normal case.
+        // The ceiling now binds only above a 1 s incumbent instead of above 100 ms.
         const std::uint64_t search_budget_ns =
-            std::min<std::uint64_t>(5'000'000ULL, incumbent.cost.total_ns / 20U);
+            std::min<std::uint64_t>(50'000'000ULL, incumbent.cost.total_ns / 20U);
         const std::uint64_t guided_watchdog_ns = search_budget_ns;
         std::uint64_t maximum_step_ns          = 0;
         std::uint32_t optional_targets         = 0;
