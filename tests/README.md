@@ -29,10 +29,13 @@ benchmark-report, and external protocol behavior. Repository verification princi
 - `test_openai_schema.cpp`, `test_openai_responses.cpp`,
   `test_openai_responses_store.cpp`, `test_anthropic_schema.cpp`, and
   `test_tool_call_parser.cpp` — current protocol translation, Responses Item/state/SSE behavior,
-  and incremental tool-call behavior;
+  schema-guided tool-argument normalization, structural fallback, and chunk-invariant incremental
+  tool-call behavior;
 - `test_request_log.cpp` — the consumed request JSONL schema and exact measurement fields, plus
-  Serve-owned failure severity and exclusion of arbitrary client error text from operational
-  records;
+  representative Serve request/throughput pretty records, failure severity, zero-field elision,
+  and exclusion of arbitrary client error text;
+- `test_pretty_logging.cpp` — observable Service/Tool prefixes and separation of executable identity
+  from the human-readable record body;
 - `test_http_error_handler.cpp` — protocol-shaped payload-limit errors and application-error
   preservation;
 - `test_ninfer_bench_support.cpp` — product benchmark CLI, timing boundary, and schema-v13 reports;
@@ -106,7 +109,10 @@ python3 -m pytest \
 
 The Python suites cover generic artifact framing and exact converter inventories, source recipes,
 encoders, and payload verification. Model execution and real-artifact binding are tested through
-the C++ target and Engine suites below; there is no Python inference implementation.
+the C++ target and Engine suites below; there is no Python inference implementation. The two
+official source-resource preflight checks are opt-in: set `NINFER_QWEN3_6_27B_MODEL` and/or
+`NINFER_QWEN3_6_35B_A3B_MODEL` to the corresponding source checkpoint directory. Only those
+source-dependent checks are skipped when their variable is absent.
 
 The C++ prefix/MTP integration test is separately opt-in because it loads the full artifact and
 runs the real engine:

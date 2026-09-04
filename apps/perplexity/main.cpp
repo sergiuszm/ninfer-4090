@@ -3,6 +3,7 @@
 
 #include "ninfer/engine.h"
 #include "product/logging/logging.h"
+#include "product/logging/pretty_format.h"
 #include "product/logging/startup_log.h"
 
 #include <nlohmann/json.hpp>
@@ -43,18 +44,20 @@ struct Options {
     std::optional<std::filesystem::path> corpus;
     std::optional<std::filesystem::path> text;
     std::optional<std::filesystem::path> output;
-    std::uint32_t context     = 4096;
-    std::uint32_t stride      = 2048;
-    int device                = 0;
-    ninfer::KvCacheStorage kv = ninfer::KvCacheStorage::Fp8E4M3Row256;
-    bool quick                = false;
+    std::uint32_t context               = 4096;
+    std::uint32_t stride                = 2048;
+    int device                          = 0;
+    ninfer::KvCacheStorage kv           = ninfer::KvCacheStorage::Fp8E4M3Row256;
+    bool quick                          = false;
+    ninfer::product::LogLevel log_level = ninfer::product::LogLevel::Info;
 };
 
 std::string usage_text() {
     return "usage: ninfer-perplexity <model.ninfer> "
            "(--corpus <manifest.json> [--quick] | --text <utf8-file>)\n"
            "       [--context N] [--stride N] [--device N]\n"
-           "       [--kv-dtype bf16|int8|fp8] [--output <directory>]\n";
+           "       [--kv-dtype bf16|int8|fp8|nvfp4|k8v4] [--output <directory>]\n"
+           "       [--log-level trace|debug|info|warning|error|critical|off]\n";
 }
 
 [[noreturn]] void usage_error(std::string_view message) {
@@ -106,11 +109,17 @@ Options parse_options(int argc, char** argv) {
                 out.kv = ninfer::KvCacheStorage::Int8Group64;
             } else if (dtype == "fp8") {
                 out.kv = ninfer::KvCacheStorage::Fp8E4M3Row256;
+            } else if (dtype == "nvfp4") {
+                out.kv = ninfer::KvCacheStorage::Nvfp4Group16;
+            } else if (dtype == "k8v4") {
+                out.kv = ninfer::KvCacheStorage::Fp8KeyNvfp4Value;
             } else {
-                usage_error("--kv-dtype must be bf16, int8, or fp8");
+                usage_error("--kv-dtype must be bf16, int8, fp8, nvfp4, or k8v4");
             }
         } else if (option == "--output") {
             out.output = std::filesystem::path(value("--output"));
+        } else if (option == "--log-level") {
+            out.log_level = ninfer::product::parse_log_level(value("--log-level"));
         } else {
             usage_error("unknown option: " + std::string(option));
         }
@@ -133,6 +142,10 @@ std::string kv_name(ninfer::KvCacheStorage value) {
         return "int8-g64";
     case ninfer::KvCacheStorage::Fp8E4M3Row256:
         return "fp8-e4m3-r256";
+    case ninfer::KvCacheStorage::Nvfp4Group16:
+        return "nvfp4";
+    case ninfer::KvCacheStorage::Fp8KeyNvfp4Value:
+        return "k8v4";
     }
     throw std::logic_error("unknown KV dtype");
 }
@@ -192,34 +205,9 @@ struct EvaluationStream {
     std::vector<WindowPlan> windows;
 };
 
-class EvaluationPhaseTerminal {
-public:
-    EvaluationPhaseTerminal(std::shared_ptr<spdlog::logger> logger, std::string phase,
-                            Clock::time_point started)
-        : logger_(std::move(logger)), phase_(std::move(phase)), started_(started) {}
-
-    ~EvaluationPhaseTerminal() {
-        if (complete_) { return; }
-        try {
-            logger_->error("evaluation phase={} status=failed duration_ms={:.3f}", phase_,
-                           seconds_since(started_) * 1000.0);
-        } catch (...) {}
-    }
-
-    EvaluationPhaseTerminal(const EvaluationPhaseTerminal&)            = delete;
-    EvaluationPhaseTerminal& operator=(const EvaluationPhaseTerminal&) = delete;
-
-    void complete() noexcept { complete_ = true; }
-
-private:
-    std::shared_ptr<spdlog::logger> logger_;
-    std::string phase_;
-    Clock::time_point started_;
-    bool complete_ = false;
-};
-
 int run(const Options& options, const std::shared_ptr<spdlog::logger>& logger,
-        ninfer::product::StartupLogRenderer& startup_log) {
+        ninfer::product::StartupLogRenderer& startup_log,
+        const std::shared_ptr<ninfer::product::TerminalProgress>& progress) {
     const Clock::time_point total_started = Clock::now();
     ninfer::EngineOptions engine_options;
     engine_options.artifact_path    = options.artifact;
@@ -233,8 +221,7 @@ int run(const Options& options, const std::shared_ptr<spdlog::logger>& logger,
     startup_log.engine_ready(load);
 
     const Clock::time_point preflight_started = Clock::now();
-    logger->info("evaluation phase=corpus-preflight status=begin");
-    EvaluationPhaseTerminal preflight_phase(logger, "corpus-preflight", preflight_started);
+    logger->info("preparing corpus");
     CorpusSelection corpus = options.corpus
                                  ? ninfer::perplexity::load_corpus(*options.corpus, options.quick)
                                  : ninfer::perplexity::load_custom_text(*options.text);
@@ -258,17 +245,19 @@ int run(const Options& options, const std::shared_ptr<spdlog::logger>& logger,
                                            .windows = std::move(windows)});
     }
     const double preflight_seconds = seconds_since(preflight_started);
-    logger->info("evaluation phase=corpus-preflight status=complete streams={} input_tokens={} "
-                 "scored_tokens={} windows={} duration_ms={:.3f}",
-                 streams.size(), total_input_tokens, total_scored_tokens, total_windows,
-                 preflight_seconds * 1000.0);
-    preflight_phase.complete();
+    logger->info("corpus ready | {} streams | {} input tokens | {} scored tokens | {} windows | {}",
+                 ninfer::product::format_pretty_count(streams.size()),
+                 ninfer::product::format_pretty_count(total_input_tokens),
+                 ninfer::product::format_pretty_count(total_scored_tokens),
+                 ninfer::product::format_pretty_count(total_windows),
+                 ninfer::product::format_pretty_duration(preflight_seconds));
 
     const std::filesystem::path output_directory = prepare_output_directory(options, load, corpus);
     const Clock::time_point scoring_started      = Clock::now();
-    logger->info("evaluation phase=scoring status=begin streams={} scored_tokens={} windows={}",
-                 streams.size(), total_scored_tokens, total_windows);
-    EvaluationPhaseTerminal scoring_phase(logger, "scoring", scoring_started);
+    logger->info("scoring | {} streams | {} tokens | {} windows",
+                 ninfer::product::format_pretty_count(streams.size()),
+                 ninfer::product::format_pretty_count(total_scored_tokens),
+                 ninfer::product::format_pretty_count(total_windows));
     Clock::time_point next_progress = scoring_started + std::chrono::seconds(10);
     ScoreAggregate overall;
     std::map<std::string, ScoreAggregate> domains;
@@ -277,13 +266,17 @@ int run(const Options& options, const std::shared_ptr<spdlog::logger>& logger,
 
     for (std::size_t stream_index = 0; stream_index < streams.size(); ++stream_index) {
         EvaluationStream& stream = streams[stream_index];
-        logger->info("evaluation phase=stream status=begin index={} total={} id={} input_tokens={} "
-                     "windows={}",
-                     stream_index + 1, streams.size(),
-                     ninfer::product::quote_log_value(stream.source.id), stream.tokens.size(),
-                     stream.windows.size());
+        std::ostringstream stream_status;
+        stream_status << "  scoring [" << stream_index + 1 << '/' << streams.size() << "] "
+                      << ninfer::product::format_pretty_text(stream.source.id) << " | "
+                      << ninfer::product::format_pretty_count(stream.tokens.size()) << " tokens | "
+                      << ninfer::product::format_pretty_count(stream.windows.size()) << " windows";
+        if (progress->enabled()) {
+            progress->update(stream_status.str());
+        } else {
+            logger->debug("{}", stream_status.str());
+        }
         const Clock::time_point stream_started = Clock::now();
-        EvaluationPhaseTerminal stream_phase(logger, "stream", stream_started);
         ScoreAggregate stream_score;
         json window_reports = json::array();
         for (std::size_t window_index = 0; window_index < stream.windows.size(); ++window_index) {
@@ -325,28 +318,32 @@ int run(const Options& options, const std::shared_ptr<spdlog::logger>& logger,
                 const double rate    = static_cast<double>(overall.scored_tokens) / elapsed;
                 const std::uint64_t remaining = total_scored_tokens - overall.scored_tokens;
                 const double eta = rate > 0 ? static_cast<double>(remaining) / rate : 0.0;
-                logger->info(
-                    "evaluation phase=scoring status=progress scored_tokens={} total_tokens={} "
-                    "completed_windows={} total_windows={} mean_nll={:.8g} perplexity={:.8g} "
-                    "tokens_per_second={:.3f} elapsed_ms={:.3f} eta_ms={:.3f}",
-                    overall.scored_tokens, total_scored_tokens, completed_windows, total_windows,
-                    overall.mean_nll(), overall.ppl(), rate, elapsed * 1000.0, eta * 1000.0);
+                std::ostringstream line;
+                line << "scoring | " << ninfer::product::format_pretty_count(overall.scored_tokens)
+                     << '/' << ninfer::product::format_pretty_count(total_scored_tokens)
+                     << " tokens | " << completed_windows << '/' << total_windows
+                     << " windows | PPL " << std::fixed << std::setprecision(4) << overall.ppl()
+                     << " | " << ninfer::product::format_pretty_rate(rate, "tok") << " | elapsed "
+                     << ninfer::product::format_pretty_duration(elapsed) << " | ETA "
+                     << ninfer::product::format_pretty_duration(eta);
+                if (progress->enabled()) {
+                    progress->update("  " + line.str());
+                } else {
+                    logger->info("{}", line.str());
+                }
                 next_progress = Clock::now() + std::chrono::seconds(10);
             }
         }
         const double stream_seconds = seconds_since(stream_started);
-        logger->info(
-            "evaluation phase=stream status=complete id={} scored_tokens={} mean_nll={:.8g} "
-            "perplexity={:.8g} duration_ms={:.3f}",
-            ninfer::product::quote_log_value(stream.source.id), stream_score.scored_tokens,
-            stream_score.mean_nll(), stream_score.ppl(), stream_seconds * 1000.0);
-        stream_phase.complete();
+        progress->clear();
+        logger->info("[{}/{}] {} | {} scored tokens | PPL {:.6g} | {}", stream_index + 1,
+                     streams.size(), ninfer::product::format_pretty_text(stream.source.id),
+                     ninfer::product::format_pretty_count(stream_score.scored_tokens),
+                     stream_score.ppl(), ninfer::product::format_pretty_duration(stream_seconds));
         json stream_report               = aggregate_json(stream_score);
         stream_report["id"]              = stream.source.id;
         stream_report["domain"]          = stream.source.domain;
         stream_report["path"]            = stream.source.path.string();
-        stream_report["bytes"]           = stream.source.text.size();
-        stream_report["sha256"]          = stream.source.sha256;
         stream_report["input_tokens"]    = stream.tokens.size();
         stream_report["unscored_tokens"] = 1;
         stream_report["seconds"]         = stream_seconds;
@@ -355,11 +352,12 @@ int run(const Options& options, const std::shared_ptr<spdlog::logger>& logger,
     }
 
     const double scoring_seconds = seconds_since(scoring_started);
-    logger->info("evaluation phase=scoring status=complete scored_tokens={} completed_windows={} "
-                 "mean_nll={:.8g} perplexity={:.8g} duration_ms={:.3f}",
-                 overall.scored_tokens, completed_windows, overall.mean_nll(), overall.ppl(),
-                 scoring_seconds * 1000.0);
-    scoring_phase.complete();
+    progress->clear();
+    logger->info("scoring complete | {} tokens | {} windows | PPL {:.6g} | {} | {}",
+                 ninfer::product::format_pretty_count(overall.scored_tokens), completed_windows,
+                 overall.ppl(), ninfer::product::format_pretty_duration(scoring_seconds),
+                 ninfer::product::format_pretty_rate(
+                     static_cast<double>(overall.scored_tokens) / scoring_seconds, "tok"));
     json domain_reports = json::array();
     for (const auto& [domain, aggregate] : domains) {
         json item      = aggregate_json(aggregate);
@@ -449,14 +447,17 @@ int main(int argc, char** argv) {
         return 0;
     }
 
-    ninfer::product::LoggingRuntime logging({.logger_name = "ninfer-perplexity"});
+    ninfer::product::LoggingRuntime logging(
+        {.logger_name  = "ninfer-perplexity",
+         .level        = options.log_level,
+         .presentation = ninfer::product::LogPresentation::Tool});
     const std::shared_ptr<spdlog::logger> logger = logging.logger();
     ninfer::product::StartupLogRenderer startup_log(logging);
     try {
-        return run(options, logger, startup_log);
+        return run(options, logger, startup_log, logging.terminal_progress());
     } catch (const std::exception& error) {
-        logger->error("application status=failed detail={}",
-                      ninfer::product::quote_log_value(error.what()));
+        logging.terminal_progress()->clear();
+        logger->error("{}", ninfer::product::format_pretty_text(error.what()));
         return 1;
     }
 }

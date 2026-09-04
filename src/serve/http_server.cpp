@@ -232,7 +232,7 @@ HttpServer::HttpServer(ServeOptions options, std::shared_ptr<spdlog::logger> log
         static_cast<std::size_t>(options_.max_concurrency) + options_.max_pending_requests;
     const std::size_t worker_count = queued_requests + 1;
     server_.new_task_queue         = [queued_requests, worker_count] {
-        return new httplib::ThreadPool(worker_count, queued_requests);
+        return new httplib::ThreadPool(worker_count, worker_count, queued_requests);
     };
     server_.set_socket_options(configure_http_server_socket);
     server_.set_payload_max_length(options_.max_request_bytes);
@@ -309,11 +309,14 @@ void HttpServer::run_stats_reporter() {
     ninfer::RuntimeStats previous   = service_->runtime_stats();
     Clock::time_point previous_time = Clock::now();
     const auto interval             = std::chrono::milliseconds(options_.log_stats_interval_ms);
+    Clock::time_point next_deadline = previous_time + interval;
 
     for (;;) {
         {
             std::unique_lock lock(stats_mutex_);
-            if (stats_cv_.wait_for(lock, interval, [this] { return stats_stopping_; })) { break; }
+            if (stats_cv_.wait_until(lock, next_deadline, [this] { return stats_stopping_; })) {
+                break;
+            }
         }
 
         const ninfer::RuntimeStats current = service_->runtime_stats();
@@ -323,13 +326,18 @@ void HttpServer::run_stats_reporter() {
         if (report_has_activity(report)) { record_throughput(report); }
         previous      = current;
         previous_time = now;
+        next_deadline += interval;
+        const Clock::time_point after_write = Clock::now();
+        if (next_deadline <= after_write) { next_deadline = after_write + interval; }
     }
 
     const ninfer::RuntimeStats current = service_->runtime_stats();
     const Clock::time_point now        = Clock::now();
     const ThroughputReport tail        = make_throughput_report(
         previous, current, std::chrono::duration<double>(now - previous_time).count());
-    if (report_has_activity(tail)) { record_throughput(tail); }
+    // The exact partial interval remains useful to measurement consumers. Pretty throughput is a
+    // fixed-cadence operational record and deliberately has no irregular shutdown tail.
+    if (report_has_activity(tail)) { request_jsonl_.write_throughput(tail); }
 }
 
 void HttpServer::stop_stats_reporter() {
@@ -435,15 +443,16 @@ void HttpServer::register_routes() {
             }
         });
 
-    // A latched engine failure is permanent - every request then returns 503 "inference
-    // engine is unavailable" and only a restart recovers - so a hardcoded ok here would
-    // hide exactly the state a supervisor, load balancer or fleet dashboard needs to see.
-    // Before a service is attached the server is still binding ahead of model load, which
-    // is healthy by design.
+    // Readiness and liveness in one answer. Before the service attaches (model still loading)
+    // and after a latched engine failure the server answers 503, so a supervisor, load balancer
+    // or fleet dashboard never routes to an instance that cannot serve. A latched failure is
+    // permanent - every request then returns 503 "inference engine is unavailable" and only a
+    // restart recovers - so a hardcoded ok here would hide exactly that state.
     server_.Get("/health", [this](const httplib::Request&, httplib::Response& res) {
-        const bool healthy = service_ == nullptr || service_->healthy();
-        if (!healthy) { res.status = 503; }
-        res.set_content(nlohmann::json{{"status", healthy ? "ok" : "error"}}.dump(),
+        const bool available =
+            service_ != nullptr && service_->is_available() && service_->healthy();
+        res.status = available ? 200 : 503;
+        res.set_content(nlohmann::json{{"status", available ? "ok" : "unavailable"}}.dump(),
                         "application/json");
     });
     server_.Get("/metrics", [this](const httplib::Request&, httplib::Response& res) {

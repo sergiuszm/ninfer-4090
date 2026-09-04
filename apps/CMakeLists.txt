@@ -21,7 +21,6 @@ target_link_libraries(ninfer-serve PRIVATE ninfer_serve ninfer_product_logging)
 add_executable(ninfer-perplexity
   perplexity/main.cpp
   perplexity/corpus.cpp
-  perplexity/digest.cpp
   perplexity/evaluation.cpp)
 target_include_directories(ninfer-perplexity PRIVATE
   ${PROJECT_SOURCE_DIR}/include

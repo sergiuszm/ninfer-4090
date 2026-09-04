@@ -42,45 +42,42 @@ application logger in the global registry. `ninfer_core`, `ninfer_artifact`, `ni
 observable diagnostic through an owning typed event/callback; the product adapter decides whether
 to log it.
 
-The default logger is synchronous and uses a multi-thread-safe stderr color sink. `Auto` color is
-selected only for a capable terminal; redirected logs contain no ANSI escapes. Asynchronous queues,
-file sinks, rotation, and multiple destinations require a separate product decision because they
-introduce durability, ordering, overflow, and lifecycle semantics.
+The default logger is synchronous and uses one progress-aware stderr color sink whose owning mutex
+serializes records and transient-line updates. `Auto` color is selected only for a capable terminal;
+redirected logs contain no ANSI escapes. Asynchronous queues, file sinks, rotation, and multiple
+destinations require a separate product decision because they introduce durability, ordering,
+overflow, and lifecycle semantics.
 
-## 3. Record format
+## 3. Record representations
 
-The fixed operational pattern is:
-
-```text
-[%Y-%m-%d %H:%M:%S.%e] [%^%l%$] [%n] %v
-```
-
-It produces local wall time with millisecond precision, the lowercase spdlog level, the executable
-logger name, and one complete message. Examples:
+Operational stderr is a human-readable presentation, not a machine schema. Serve records use local
+wall time with millisecond precision and a fixed-width uppercase level; the process name is omitted
+because the dedicated process stream already supplies that identity:
 
 ```text
-[2026-09-01 21:14:50.971] [info] [ninfer-serve] startup phase=host-kv-pin status=begin total_bytes=51539607552
-[2026-09-01 21:15:22.774] [info] [ninfer-serve] startup phase=host-kv-pin status=complete completed_bytes=51539607552 total_bytes=51539607552 duration_ms=31803.100
-[2026-09-01 21:15:23.102] [info] [ninfer-serve] request id=42 status=done prompt_tokens=55055 prefix_cache_hit_tokens=55048 ttft_ms=75.200
+2026-09-02 23:12:56.607  INFO  throughput | 5.0s | decode 190.6 tok/s (953 tok) | running 1 (decode-ready 1) | batch 1.00 | host 1.5% (73.4 ms)
+2026-09-02 23:13:01.458  INFO  req#13 done | openai-chat | stop token | prompt 2,139 | output 54,088 | cache 129 (6.0%, turn closure) | TTFT 323 ms | total 5m 21.0s | prefill 6.49k tok/s | decode 169.0 tok/s
 ```
 
-Messages start with a stable event noun and then stable `key=value` fields. Field names use
-lowercase snake case. Values containing whitespace or control characters must be escaped or quoted
-by the owning renderer. A renderer must not create a second timestamp, level label, executable
-prefix, or trailing newline inside the message.
+CLI and Perplexity use the Tool presentation: informational progress has no timestamp or level
+prefix, while diagnostics use short `debug:`, `warning:`, `error:`, or `fatal:` labels. Both
+presentations use ` | ` to separate semantic groups, adaptive durations, IEC byte units,
+thousands-separated counts, and rounded rates. Optional zero-valued groups are omitted when their
+absence is unambiguous. Trusted identifiers are normalized for display and control characters are
+never allowed to create another physical record.
 
-Exact counts use base units in their field name: `bytes`, `tokens`, `pages`, `slots`, `duration_ms`,
-or `elapsed_ns`. Human-readable GiB and rates may supplement an exact value but never replace it.
-Floating-point fields state the same semantic boundary on every record and use enough precision for
-operator interpretation; full-precision measurement remains in the machine record.
+Pretty output is intentionally not parsed. Exact base units, full floating-point precision, all
+zero-valued gauges, and stable snake-case field names belong to the independent typed JSON/JSONL
+measurement writers. A producer passes the same typed value independently to its pretty renderer
+and machine writer; neither consumes text produced by the other.
 
 ## 4. Levels
 
 | Level | Contract |
 |---|---|
 | `trace` | exceptionally fine diagnostic events enabled only for a concrete investigation |
-| `debug` | startup planning, graph/profile inventory, and resource-decision detail not needed for normal operation |
-| `info` | phase transitions, readiness, normal request lifecycle, periodic throughput, and orderly shutdown |
+| `debug` | all startup transitions, graph/profile inventory, memory ledgers, and resource-decision detail not needed for normal operation |
+| `info` | material startup milestones, readiness, normal request lifecycle, fixed-interval throughput, and orderly shutdown |
 | `warning` | recoverable overload, timeout, degraded external input, or an operator-relevant condition that does not invalidate the process |
 | `error` | failed operation, internal request failure, or loss of an optional output such as request JSONL |
 | `critical` | process-level state cannot safely continue |
@@ -127,12 +124,19 @@ return and C++ exception unwinding; a fatal CUDA `abort()` uses the emergency di
 does not unwind typed scopes. Rate limiting belongs to the product renderer. Producers do not print
 ad hoc dots, percentages, carriage-return lines, or duplicate completion summaries.
 
-When stderr is a terminal, `ninfer_product_logging` may render one transient startup progress line
-below the persistent spdlog records. The progress-aware stderr sink owns the same mutex as normal
+When stderr is a terminal, `ninfer_product_logging` may render one transient startup or offline-tool
+progress line below persistent records. The progress-aware stderr sink owns the same mutex as normal
 records: it erases the transient line before a log record and redraws it afterward. Only a phase
-with real byte progress displays a percentage, pipeline rate, or ETA. Completion erases the line and
-emits the ordinary structured terminal record. Redirected stderr never receives this transient
-line, carriage returns, or progress-bar text; it receives rate-limited structured progress records.
+with real byte progress displays a percentage, rate, or ETA. Completion erases the line and emits a
+readable terminal summary. Redirected stderr never receives carriage returns, ANSI escapes, or a
+progress bar; long operations instead receive rate-limited persistent progress records.
+
+Serve runtime throughput is never transient. While Engine or context-resource activity exists, one
+persistent pretty record and, when request logging is enabled, one full-precision JSONL record are
+produced from the same interval at each configured deadline. Periodic scheduling uses absolute
+steady-clock deadlines so logging work does not accumulate drift. Missed periods are not replayed
+in a burst. A partial shutdown interval may be retained by JSONL, but does not create an irregular
+pretty throughput record.
 
 Engine startup is an inclusive typed hierarchy. `engine-startup` contains CUDA initialization,
 artifact inspection, target planning, weight materialization, target/frontend/Program construction,
@@ -140,6 +144,10 @@ and Engine finalization. `weights-staging-pin` is nested in `weights-materialize
 Host KV pin, and CUDA Graph preparation are nested in `program-initialize`. Nested durations explain
 their parent and must not be added to it. Disabled zero-capacity phases are omitted. Byte progress is
 reported as submitted work, while only a synchronized terminal event reports completed bytes.
+The normal pretty view retains weight materialization, enabled Host pinning, CUDA Graph preparation,
+and the merged Engine-ready summary. Internal staging, planning, frontend, Program aggregate, and
+finalization phases remain `debug`; elapsed time alone does not make an internal milestone useful to
+an operator. Every failed phase remains an error regardless of its ordinary visibility.
 
 Serve owns request failure classification and severity. A prepared generation request receives one
 machine terminal: `request_done` immediately after `GenerationService::run()` returns, or
@@ -147,15 +155,19 @@ machine terminal: `request_done` immediately after `GenerationService::run()` re
 transport happen after that transaction; their failures are operational `response` records and do
 not create a second request JSONL terminal.
 
+Tool-call parameter normalization remains a successful request outcome. Empty-argument omissions
+and schema mismatches are machine-only counters. If a complete tool marker must be returned to text
+because its structure or declared identity cannot be represented, Serve emits one warning carrying
+only the stable fallback classification; generated markup and arguments remain excluded.
+
 There is no dual spdlog/custom operational path. Product results, machine measurements, and the
 explicit emergency cases above remain direct outputs because they are different contracts.
 
 ## 7. Verification policy
 
-Logging tests protect NInfer-owned observable semantics, not spdlog internals or private object
-shape. The request-log test covers the consumed JSONL schema plus Serve failure severity and the
-rule that arbitrary client error text is absent from operational output. The corpus consumer test
-protects its exact schema-version agreement with Serve. Startup ordering and presentation are
-verified through real terminal and redirected startup paths when that code changes; synthetic
-observer, formatter snapshot, registry, color, mutex, getter, and constructor tests are not
-retained.
+Logging tests protect NInfer-owned observable semantics, not private object shape. The request-log
+test covers the consumed JSONL schema, representative request/throughput pretty records, Serve
+failure severity, and exclusion of arbitrary client error text. The pretty-logging test covers the
+observable Service and Tool prefixes. The corpus consumer test protects its exact schema-version
+agreement with Serve. Startup progress coordination is verified through terminal and redirected
+paths when that code changes; registry, mutex, getter, and constructor tests are not retained.

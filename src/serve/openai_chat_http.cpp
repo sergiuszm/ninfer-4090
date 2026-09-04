@@ -40,10 +40,15 @@ void HttpServer::handle_chat_completions(const httplib::Request& req, httplib::R
                                       .output_tokens_explicit = request.output_tokens_explicit};
     PreparedRequest prepared;
     try {
+        const ninfer::GenerationObservationOptions observation{
+            .phase_timings   = true,
+            .live_timings    = request.stream && request.timings_per_token,
+            .prompt_progress = request.stream && request.return_progress,
+        };
         prepared = service_->prepare(request.generation,
                                      request.stream ? GenerationConsumerMode::Streaming
                                                     : GenerationConsumerMode::Aggregate,
-                                     [&req] { return client_disconnected(req); });
+                                     observation, [&req] { return client_disconnected(req); });
     } catch (const ApiException& exception) {
         record_request_rejected(make_request_rejection_log_context(
             req_id, "openai_chat_completions", request.generation, metadata, exception.error()));
@@ -100,13 +105,17 @@ void HttpServer::handle_chat_completions(const httplib::Request& req, httplib::R
     }
 
     try {
-        auto stream  = std::make_shared<HttpGenerationStream>(std::move(prepared));
-        auto encoder = std::make_shared<OpenAIChatStream>(identity, request.include_usage);
+        const bool return_progress   = request.return_progress;
+        const bool timings_per_token = request.timings_per_token;
+        auto stream                  = std::make_shared<HttpGenerationStream>(std::move(prepared));
+        auto encoder = std::make_shared<OpenAIChatStream>(identity, request.include_usage,
+                                                          timings_per_token, return_progress);
 
         prepare_sse_response(res);
         res.set_chunked_content_provider(
             "text/event-stream",
-            [this, stream, encoder, lifecycle](std::size_t, httplib::DataSink& sink) -> bool {
+            [this, stream, encoder, lifecycle, return_progress,
+             timings_per_token](std::size_t, httplib::DataSink& sink) -> bool {
                 if (stream->started.exchange(true, std::memory_order_acq_rel)) {
                     sink.done();
                     return true;
@@ -146,6 +155,24 @@ void HttpServer::handle_chat_completions(const httplib::Request& req, httplib::R
                 GenerationOutcome outcome;
                 try {
                     StreamSink output;
+                    output.on_start = [&](const ninfer::GenerationStart& start) {
+                        encoder->note_start(start);
+                        if (return_progress) {
+                            render_and_write(transport,
+                                             [&] { return encoder->initial_prompt_progress(); });
+                        }
+                    };
+                    if (return_progress) {
+                        output.on_progress = [&](const ninfer::PromptProgress& progress) {
+                            render_and_write(transport,
+                                             [&] { return encoder->prompt_progress(progress); });
+                        };
+                    }
+                    if (timings_per_token) {
+                        output.on_timing = [&](const ninfer::GenerationTimingObservation& timing) {
+                            encoder->note_timing(timing);
+                        };
+                    }
                     output.on_content = [&](const std::string& text) {
                         render_and_write(transport, [&] { return encoder->content_delta(text); });
                     };

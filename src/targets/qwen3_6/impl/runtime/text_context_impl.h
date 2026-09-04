@@ -885,7 +885,7 @@ void TextContext::gdn_mix(const GdnLayerW& w, Tensor& x, int gidx, Phase ph) {
     Tensor g           = control.g;
     Tensor beta        = control.beta;
     Variant::gdn_norm_control_projection(x, *w.input_norm, kCfg.rms_eps, *w.projection, h, g, beta,
-                                         work_, s);
+                                         work_, ctx_.execution_view());
 
     const auto projection = workspace_recipe::gdn_projection<TextConfig>(work_, T);
     Tensor z              = projection.output_gate.view({kCfg.gdn_v_dim, kCfg.gdn_v_heads, T});
@@ -1352,6 +1352,20 @@ PrefillChunkResult TextContext::prefill_chunk(const qwen3_6::PreparedPromptData&
     const MultimodalPrefill multimodal{tokens, input.positions, &vision, begin, input.rope_delta};
     NullTap tap;
     return prefill_impl(tokens.subspan(begin, nominal_length), nullptr, &multimodal, tap,
+                        finalize_at_end);
+}
+
+PrefillChunkResult TextContext::prefill_chunk(const qwen3_6::PreparedPromptData& input,
+                                              std::uint32_t begin, std::uint32_t nominal_length,
+                                              VisionPrefillSession& vision, bool finalize_at_end,
+                                              DFlashFeatureSink& sink) {
+    if (begin >= input.token_ids.size() || nominal_length == 0 ||
+        nominal_length > input.token_ids.size() - begin) {
+        throw std::invalid_argument("multimodal prefill chunk is outside the prompt");
+    }
+    const std::span<const int> tokens(input.token_ids);
+    const MultimodalPrefill multimodal{tokens, input.positions, &vision, begin, input.rope_delta};
+    return prefill_impl(tokens.subspan(begin, nominal_length), nullptr, &multimodal, sink,
                         finalize_at_end);
 }
 

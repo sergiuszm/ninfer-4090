@@ -49,6 +49,40 @@ constexpr std::uint32_t kKvFlagPackedK   = 1U << 3;
 constexpr std::uint32_t kKvFlagE8Lattice = 1U << 4;
 constexpr std::uint32_t kKvFlagE8Root    = 1U << 5;
 
+// The header keeps the pre-merge (dtype, quant group, packing flags) triple so files written by
+// earlier builds stay restorable. All three derive from the storage enum: every int8-family mode
+// reported DType::I8 at group 64 and carried its packing in the flags.
+struct SnapshotKvProfile {
+    DType dtype;
+    std::int32_t quant_group;
+    std::uint32_t flags;
+};
+
+inline SnapshotKvProfile snapshot_kv_profile(KvCacheStorage storage) {
+    const KvForkModeFlags mode = kv_fork_mode_flags(storage);
+    const std::uint32_t flags =
+        (mode.packed_v ? kKvFlagPackedV : 0U) | (mode.rotate_k ? kKvFlagRotateK : 0U) |
+        (mode.rotate_v ? kKvFlagRotateV : 0U) | (mode.packed_k ? kKvFlagPackedK : 0U) |
+        (mode.e8_lattice ? kKvFlagE8Lattice : 0U) | (mode.e8_root ? kKvFlagE8Root : 0U);
+    switch (storage) {
+    case KvCacheStorage::BFloat16:
+        return {DType::BF16, 0, flags};
+    case KvCacheStorage::Fp8E4M3Row256:
+        return {DType::FP8_E4M3FN, kKvFp8QuantGroup, flags};
+    case KvCacheStorage::Int8Group64:
+    case KvCacheStorage::RotatedInt8KeyInt4ValueGroup64:
+    case KvCacheStorage::RotatedInt4KeyInt4ValueGroup64:
+    case KvCacheStorage::RK4V4E8:
+    case KvCacheStorage::RK2V4E8:
+        return {DType::I8, kKvInt8QuantGroup, flags};
+    case KvCacheStorage::Nvfp4Group16:
+    case KvCacheStorage::Fp8KeyNvfp4Value:
+        // Not servable on this build; the value only needs to be distinct and stable.
+        return {DType::U8, 16, flags};
+    }
+    throw std::logic_error("unknown KV-cache storage");
+}
+
 class SnapshotWriter {
 public:
     explicit SnapshotWriter(std::vector<std::uint8_t>& out) : out_(out) {}
@@ -423,13 +457,11 @@ ProgramImplCore::save_continuation(const ContinuationHandle& continuation,
         throw std::logic_error("retained session backend KV address has no backing cache");
     }
 
+    const SnapshotKvProfile kv_profile = snapshot_kv_profile(kv_storage);
     SnapshotConfig config;
-    config.kv_dtype       = static_cast<std::uint32_t>(kv_dtype);
-    config.kv_quant_group = kv_quant_group;
-    config.kv_flags       = (kv_packed_v ? kKvFlagPackedV : 0U) |
-                      (kv_rotate_k ? kKvFlagRotateK : 0U) | (kv_rotate_v ? kKvFlagRotateV : 0U) |
-                      (kv_packed_k ? kKvFlagPackedK : 0U) |
-                      (kv_e8_lattice ? kKvFlagE8Lattice : 0U) | (kv_e8_root ? kKvFlagE8Root : 0U);
+    config.kv_dtype            = static_cast<std::uint32_t>(kv_profile.dtype);
+    config.kv_quant_group      = kv_profile.quant_group;
+    config.kv_flags            = kv_profile.flags;
     config.speculative_backend = static_cast<std::uint32_t>(speculative_backend);
     config.draft_window        = draft_window;
     config.page_size           = static_cast<std::uint32_t>(kPagedKVPageSize);
@@ -626,12 +658,9 @@ ProgramImplCore::restore_continuation(std::span<const std::uint8_t> snapshot,
     }
 
     const SnapshotConfig config = read_config(reader);
-    const std::uint32_t expected_flags =
-        (kv_packed_v ? kKvFlagPackedV : 0U) | (kv_rotate_k ? kKvFlagRotateK : 0U) |
-        (kv_rotate_v ? kKvFlagRotateV : 0U) | (kv_packed_k ? kKvFlagPackedK : 0U) |
-        (kv_e8_lattice ? kKvFlagE8Lattice : 0U) | (kv_e8_root ? kKvFlagE8Root : 0U);
-    if (config.kv_dtype != static_cast<std::uint32_t>(kv_dtype) ||
-        config.kv_quant_group != kv_quant_group || config.kv_flags != expected_flags ||
+    const SnapshotKvProfile kv_profile = snapshot_kv_profile(kv_storage);
+    if (config.kv_dtype != static_cast<std::uint32_t>(kv_profile.dtype) ||
+        config.kv_quant_group != kv_profile.quant_group || config.kv_flags != kv_profile.flags ||
         config.page_size != static_cast<std::uint32_t>(kPagedKVPageSize) ||
         config.text_plane_count != static_cast<std::uint32_t>(text_pool.plane_count()) ||
         config.text_page_stride != text_layout.page_stride) {
@@ -925,7 +954,6 @@ ProgramImplCore::restore_continuation(std::span<const std::uint8_t> snapshot,
         sequence.rope_delta               = session.rope_delta;
         sequence.mtp_draft_count          = 0;
         sequence.tail_hidden_valid        = session.tail_hidden_valid != 0;
-        sequence.state_source_retained    = false;
         sequence.endpoint_valid           = true;
         sequence.rewrite_checkpoint       = {};
         sequence.rewrite_state.reset();

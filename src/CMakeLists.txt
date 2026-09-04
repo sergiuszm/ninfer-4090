@@ -49,20 +49,22 @@ add_library(ninfer_artifact STATIC
 ninfer_internal_includes(ninfer_artifact)
 target_link_libraries(ninfer_artifact PUBLIC ninfer_core)
 
-# The warp-specialized SM120 kernel uses setmaxnreg to transfer registers from its
-# producer warpgroup to its consumer warpgroups. Relocatable device code makes ptxas
-# discard that contract, so this self-contained kernel is intentionally compiled in a
-# non-RDC archive and called through a host launcher from ninfer_ops.
+# Warp-specialized SM120 NVFP4 kernels use setmaxnreg to transfer registers from producer
+# warpgroups to consumer warpgroups. Relocatable device code makes ptxas discard that contract, so
+# these self-contained kernels are intentionally compiled in a non-RDC archive and called through
+# host launchers from ninfer_ops. Fork-local: built only for sm_120a. The sm_89 build has no FP4
+# tensor cores and gates the NVFP4 paths off.
 if(CMAKE_CUDA_ARCHITECTURES STREQUAL "120a")
-  add_library(ninfer_nvfp4_tma STATIC
+  add_library(ninfer_nvfp4_non_rdc STATIC
     ops/linear/nvfp4/nvfp4_w4a4_tma.cu
-    ops/linear_swiglu/nvfp4/nvfp4_linear_swiglu_w4a4_tma.cu)
-  ninfer_internal_includes(ninfer_nvfp4_tma)
-  set_target_properties(ninfer_nvfp4_tma PROPERTIES
+    ops/linear_swiglu/nvfp4/nvfp4_linear_swiglu_w4a4_tma.cu
+    ops/softmax_attention/dense/causal_cache/prompt_nvfp4_non_rdc.cu)
+  ninfer_internal_includes(ninfer_nvfp4_non_rdc)
+  set_target_properties(ninfer_nvfp4_non_rdc PROPERTIES
     CUDA_SEPARABLE_COMPILATION OFF
     CUDA_RESOLVE_DEVICE_SYMBOLS OFF)
-  target_compile_options(ninfer_nvfp4_tma PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:-lineinfo>)
-  target_link_libraries(ninfer_nvfp4_tma PRIVATE ninfer_core CUDA::cudart CUDA::cuda_driver)
+  target_compile_options(ninfer_nvfp4_non_rdc PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:-lineinfo>)
+  target_link_libraries(ninfer_nvfp4_non_rdc PRIVATE ninfer_core CUDA::cudart CUDA::cuda_driver)
 endif()
 
 # Shared mathematical Ops. The list is intentionally explicit: adding a
@@ -97,8 +99,12 @@ add_library(ninfer_ops STATIC
   ops/softmax_attention/dense/causal_cache/causal_softmax_attention.cpp
   ops/softmax_attention/dense/causal_cache/small_t.cu
   ops/softmax_attention/dense/causal_cache/small_t_fp8.cu
+  ops/softmax_attention/dense/causal_cache/small_t_nvfp4.cu
+  ops/softmax_attention/dense/causal_cache/small_t_k8v4.cu
   ops/softmax_attention/dense/causal_cache/prompt.cu
   ops/softmax_attention/dense/causal_cache/prompt_fp8.cu
+  ops/softmax_attention/dense/causal_cache/prompt_nvfp4.cu
+  ops/softmax_attention/dense/causal_cache/prompt_k8v4.cu
   ops/softmax_attention/dense/packed/packed_softmax_attention.cpp
   ops/softmax_attention/dense/packed/launch.cu
   ops/softmax_attention/dense/context/context_softmax_attention.cpp
@@ -107,6 +113,8 @@ add_library(ninfer_ops STATIC
   ops/softmax_attention/sliding_window/launch.cu
   ops/kv_cache/append/kv_cache_append.cpp
   ops/kv_cache/append/launch.cu
+  ops/kv_cache/append/nvfp4_launch.cu
+  ops/kv_cache/append/k8v4_launch.cu
   # Gated DeltaNet Linear Attention core.
   ops/linear_attention/gated_delta_net/gated_delta_net.cpp
   ops/linear_attention/gated_delta_net/replay.cpp
@@ -276,6 +284,10 @@ add_library(ninfer_ops STATIC
 if(CMAKE_CUDA_ARCHITECTURES STREQUAL "86" OR CMAKE_CUDA_ARCHITECTURES STREQUAL "89")
   get_target_property(ninfer_ops_sources ninfer_ops SOURCES)
   list(FILTER ninfer_ops_sources EXCLUDE REGEX "nvfp4/.+_w4a4\\.cu$")
+  # The NVFP4-valued KV-cache kernels quantize with cvt.e2m1x2 (sm_100+). Their launchers are
+  # stubbed in ops/nvfp4_sm86_stubs.cpp and the storage modes are rejected at startup.
+  list(FILTER ninfer_ops_sources EXCLUDE REGEX "causal_cache/small_t_(nvfp4|k8v4)\\.cu$")
+  list(FILTER ninfer_ops_sources EXCLUDE REGEX "kv_cache/append/(nvfp4|k8v4)_launch\\.cu$")
   set_property(TARGET ninfer_ops PROPERTY SOURCES ${ninfer_ops_sources})
   target_sources(ninfer_ops PRIVATE ops/nvfp4_sm86_stubs.cpp)
   target_compile_definitions(ninfer_ops PUBLIC NINFER_SM86=1)
@@ -283,8 +295,8 @@ endif()
 ninfer_internal_includes(ninfer_ops)
 ninfer_cuda_archive(ninfer_ops)
 target_link_libraries(ninfer_ops PUBLIC ninfer_core)
-if(TARGET ninfer_nvfp4_tma)
-  target_link_libraries(ninfer_ops PRIVATE ninfer_nvfp4_tma)
+if(TARGET ninfer_nvfp4_non_rdc)
+  target_link_libraries(ninfer_ops PRIVATE ninfer_nvfp4_non_rdc)
 endif()
 
 # Product-independent text and media mechanisms.
@@ -321,6 +333,7 @@ endif()
 if(NINFER_BUILD_APPS OR BUILD_TESTING)
   add_library(ninfer_product_logging STATIC
     product/logging/logging.cpp
+    product/logging/pretty_format.cpp
     product/logging/startup_log.cpp)
   ninfer_internal_includes(ninfer_product_logging)
   target_link_libraries(ninfer_product_logging PUBLIC spdlog::spdlog)
@@ -360,7 +373,6 @@ if(NINFER_BUILD_SERVE)
     serve/openai_responses_request.cpp
     serve/openai_responses_state.cpp
     serve/openai_responses_response.cpp
-    serve/anthropic_thinking_signature.cpp
     serve/anthropic_messages_request.cpp
     serve/anthropic_messages_response.cpp
     serve/anthropic_messages_http.cpp

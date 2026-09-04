@@ -26,15 +26,19 @@ enum class LogColorMode {
     Never,
 };
 
-struct LoggingOptions {
-    std::string logger_name;
-    LogLevel level     = LogLevel::Info;
-    LogColorMode color = LogColorMode::Auto;
+enum class LogPresentation {
+    Service,
+    Tool,
 };
 
-// Render one string as a single quoted key=value field value. This is structural escaping only;
-// callers remain responsible for deciding whether a value is safe to log at all.
-[[nodiscard]] std::string quote_log_value(std::string_view value);
+struct LoggingOptions {
+    std::string logger_name;
+    LogLevel level               = LogLevel::Info;
+    LogColorMode color           = LogColorMode::Auto;
+    LogPresentation presentation = LogPresentation::Service;
+};
+
+[[nodiscard]] LogLevel parse_log_level(std::string_view value);
 
 // One transient terminal line coordinated with the operational stderr sink. It is enabled only
 // when stderr is a terminal; redirected output remains persistent spdlog records only.

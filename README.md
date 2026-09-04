@@ -429,6 +429,16 @@ JSONL request logs. See [HTTP serving](docs/serving.md) and [CLI usage](docs/cli
   2026 snapshot. Its Ada dispatch tuning targets a kernel organization that upstream has since
   replaced, so this fork starts from the current 3090 base instead.
 
+## Support
+
+NInfer is a personal project that I develop out of interest. If you find it useful and would like
+to support its continued development, you can [support the project on Ko-fi](https://ko-fi.com/neroued).
+
+Support is entirely voluntary. It is not a purchase or investment and does not come with financial
+returns, promised services or features, or a role in project decisions. The project's direction,
+priorities, technical choices, and release schedule remain independently determined by the
+maintainer.
+
 ## License
 
 Apache License 2.0. See [LICENSE](LICENSE).

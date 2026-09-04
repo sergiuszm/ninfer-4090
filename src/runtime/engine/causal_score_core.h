@@ -104,6 +104,11 @@ public:
 
     [[nodiscard]] RuntimeStats runtime_stats() const noexcept { return {}; }
 
+    [[nodiscard]] bool is_available() const {
+        std::lock_guard lock(queue_mutex_);
+        return !stopping_;
+    }
+
     void reset_memory_peaks() noexcept {
         try {
             std::scoped_lock lock(execution_mutex_);

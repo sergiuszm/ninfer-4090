@@ -1,6 +1,7 @@
 #include "product/logging/startup_log.h"
 
 #include "product/logging/logging.h"
+#include "product/logging/pretty_format.h"
 
 #include <spdlog/logger.h>
 
@@ -12,7 +13,6 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
-#include <iomanip>
 #include <sstream>
 #include <string>
 #include <utility>
@@ -27,60 +27,58 @@ constexpr std::size_t kStartupPhaseCount =
 constexpr auto kInteractiveRefresh = std::chrono::milliseconds(200);
 constexpr auto kPersistentRefresh  = std::chrono::seconds(10);
 
-const char* phase_name(StartupPhase phase) {
+enum class PhaseVisibility : std::uint8_t {
+    Info,
+    Debug,
+};
+
+struct PhasePresentation {
+    const char* active;
+    const char* complete;
+    PhaseVisibility visibility;
+    bool potentially_long;
+    bool show_rate;
+};
+
+PhasePresentation phase_presentation(StartupPhase phase) noexcept {
     switch (phase) {
     case StartupPhase::EngineStartup:
-        return "engine-startup";
+        return {"starting engine", "engine startup", PhaseVisibility::Info, true, false};
     case StartupPhase::CudaInitialize:
-        return "cuda-initialize";
+        return {"initializing CUDA", "CUDA initialized", PhaseVisibility::Debug, false, false};
     case StartupPhase::ArtifactInspect:
-        return "artifact-inspect";
+        return {"inspecting artifact", "artifact inspected", PhaseVisibility::Debug, false, false};
     case StartupPhase::TargetPlan:
-        return "target-plan";
+        return {"planning runtime", "runtime planned", PhaseVisibility::Debug, false, false};
     case StartupPhase::WeightsMaterialize:
-        return "weights-materialize";
+        return {"loading weights", "weights ready", PhaseVisibility::Info, true, true};
     case StartupPhase::WeightsStagingPin:
-        return "weights-staging-pin";
+        return {"pinning staging buffers", "staging buffers pinned", PhaseVisibility::Debug, false,
+                false};
     case StartupPhase::TargetFinalize:
-        return "target-finalize";
+        return {"finalizing target", "target finalized", PhaseVisibility::Debug, false, false};
     case StartupPhase::FrontendInitialize:
-        return "frontend-initialize";
+        return {"initializing frontend", "frontend ready", PhaseVisibility::Debug, false, false};
     case StartupPhase::ProgramInitialize:
-        return "program-initialize";
+        return {"initializing runtime", "runtime initialized", PhaseVisibility::Debug, false,
+                false};
     case StartupPhase::HostStatePin:
-        return "host-state-pin";
+        return {"pinning host state", "host state pinned", PhaseVisibility::Info, true, false};
     case StartupPhase::HostKvPin:
-        return "host-kv-pin";
+        return {"pinning host KV", "host KV pinned", PhaseVisibility::Info, true, false};
     case StartupPhase::CudaGraphPrepare:
-        return "cuda-graph-prepare";
+        return {"preparing CUDA graphs", "CUDA graphs ready", PhaseVisibility::Info, false, false};
     case StartupPhase::EngineFinalize:
-        return "engine-finalize";
+        return {"finalizing engine", "engine finalized", PhaseVisibility::Debug, false, false};
     }
-    return "unknown";
+    return {"starting unknown phase", "unknown phase complete", PhaseVisibility::Debug, false,
+            false};
 }
 
 std::size_t terminal_columns() noexcept {
     winsize size{};
     if (::ioctl(STDERR_FILENO, TIOCGWINSZ, &size) == 0 && size.ws_col != 0) { return size.ws_col; }
     return 120;
-}
-
-std::string human_bytes(double bytes) {
-    constexpr std::array<const char*, 7> units = {
-        "B", "KiB", "MiB", "GiB", "TiB", "PiB", "EiB",
-    };
-    std::size_t unit = 0;
-    while (bytes >= 1024.0 && unit + 1 < units.size()) {
-        bytes /= 1024.0;
-        ++unit;
-    }
-    std::ostringstream out;
-    if (unit == 0) {
-        out << std::fixed << std::setprecision(0) << bytes << ' ' << units[unit];
-    } else {
-        out << std::fixed << std::setprecision(2) << bytes << ' ' << units[unit];
-    }
-    return out.str();
 }
 
 std::string progress_bar(double ratio, std::size_t width) {
@@ -115,35 +113,39 @@ void update_rate(PhaseProgress& state, std::uint64_t current, Clock::time_point 
     state.sample_bytes = current;
 }
 
-std::string progress_percentage(double ratio) {
-    std::ostringstream out;
-    out << std::fixed << std::setprecision(1) << std::setw(5) << 100.0 * ratio << '%';
-    return out.str();
+std::string begin_line(const PhasePresentation& phase, const StartupEvent& event) {
+    std::string line = phase.active;
+    if (event.progress_unit == StartupProgressUnit::Bytes && event.total != 0) {
+        line += " | " + format_pretty_bytes(event.total);
+    }
+    return line;
 }
 
-std::string progress_line_candidate(const char* phase, const StartupEvent& event,
+std::string progress_line_candidate(const PhasePresentation& phase, const StartupEvent& event,
                                     const PhaseProgress& state, double ratio, std::size_t bar_width,
                                     bool include_bytes, bool include_rate, bool include_eta) {
     std::ostringstream out;
-    out << "  -> " << phase << ' ';
+    out << "  " << phase.active << ' ';
     if (bar_width != 0) { out << '[' << progress_bar(ratio, bar_width) << "] "; }
-    out << progress_percentage(ratio);
+    out << format_pretty_percent(ratio);
     if (include_bytes) {
-        out << "  submitted " << human_bytes(static_cast<double>(event.current)) << '/'
-            << human_bytes(static_cast<double>(event.total));
+        out << " | " << format_pretty_bytes(event.current) << '/'
+            << format_pretty_bytes(event.total);
     }
     if (include_rate && state.smoothed_bytes_per_second > 0.0) {
-        out << "  pipe " << human_bytes(state.smoothed_bytes_per_second) << "/s";
+        out << " | "
+            << format_pretty_bytes(static_cast<std::uint64_t>(state.smoothed_bytes_per_second))
+            << "/s";
         if (include_eta && event.current < event.total) {
             const double eta =
                 static_cast<double>(event.total - event.current) / state.smoothed_bytes_per_second;
-            out << "  eta " << std::fixed << std::setprecision(1) << eta << 's';
+            out << " | ETA " << format_pretty_duration(eta);
         }
     }
     return out.str();
 }
 
-std::string interactive_progress_line(const char* phase, const StartupEvent& event,
+std::string interactive_progress_line(const PhasePresentation& phase, const StartupEvent& event,
                                       const PhaseProgress& state) {
     const double ratio =
         event.total == 0
@@ -160,9 +162,27 @@ std::string interactive_progress_line(const char* phase, const StartupEvent& eve
     for (const std::string& candidate : candidates) {
         if (candidate.size() < columns) { return candidate; }
     }
-    std::string compact = ' ' + progress_percentage(ratio) + ' ' + phase;
+    std::string compact = "  " + std::string(phase.active) + " " + format_pretty_percent(ratio);
     if (columns > 1 && compact.size() >= columns) { compact.resize(columns - 1); }
     return compact;
+}
+
+std::string complete_line(const PhasePresentation& phase, const StartupEvent& event) {
+    std::ostringstream out;
+    out << phase.complete;
+    if (event.progress_unit == StartupProgressUnit::Bytes) {
+        const std::uint64_t bytes = event.current != 0 ? event.current : event.total;
+        out << " | " << format_pretty_bytes(bytes);
+    }
+    const double seconds = static_cast<double>(event.elapsed_ns) * 1.0e-9;
+    out << " | " << format_pretty_duration(seconds);
+    if (phase.show_rate && seconds > 0.0 && event.current != 0) {
+        out << " | "
+            << format_pretty_bytes(
+                   static_cast<std::uint64_t>(static_cast<double>(event.current) / seconds))
+            << "/s";
+    }
+    return out.str();
 }
 
 } // namespace
@@ -174,8 +194,8 @@ struct StartupLogRenderer::Impl {
     ~Impl() { progress->clear(); }
 
     void render(const StartupEvent& event) {
-        const char* phase       = phase_name(event.phase);
-        const std::size_t index = static_cast<std::size_t>(event.phase);
+        const PhasePresentation presentation = phase_presentation(event.phase);
+        const std::size_t index              = static_cast<std::size_t>(event.phase);
         switch (event.status) {
         case StartupStatus::Begin: {
             const Clock::time_point now = Clock::now();
@@ -184,10 +204,16 @@ struct StartupLogRenderer::Impl {
                               .last_interactive = now - kInteractiveRefresh,
                               .sample_time      = now,
             };
-            if (event.progress_unit == StartupProgressUnit::Bytes && event.total != 0) {
-                logger->info("startup phase={} status=begin total_bytes={}", phase, event.total);
+            if (event.phase == StartupPhase::EngineStartup) {
+                logger->info("starting engine");
+            } else if (presentation.visibility == PhaseVisibility::Debug) {
+                logger->debug("{}", begin_line(presentation, event));
+            } else if (progress->enabled()) {
+                progress->update("  " + begin_line(presentation, event));
+            } else if (presentation.potentially_long) {
+                logger->info("{}", begin_line(presentation, event));
             } else {
-                logger->info("startup phase={} status=begin", phase);
+                logger->debug("{}", begin_line(presentation, event));
             }
             return;
         }
@@ -199,41 +225,40 @@ struct StartupLogRenderer::Impl {
                 if (now - state.last_interactive < kInteractiveRefresh) { return; }
                 state.last_interactive = now;
                 if (event.progress_unit == StartupProgressUnit::Bytes && event.total != 0) {
-                    progress->update(interactive_progress_line(phase, event, state));
+                    progress->update(interactive_progress_line(presentation, event, state));
                 }
                 return;
             }
             if (now - state.last_persistent < kPersistentRefresh) { return; }
             state.last_persistent = now;
-            if (event.progress_unit == StartupProgressUnit::Bytes) {
-                logger->info("startup phase={} status=progress submitted_bytes={} total_bytes={}",
-                             phase, event.current, event.total);
+            if (event.progress_unit == StartupProgressUnit::Bytes && event.total != 0) {
+                logger->info("{}", progress_line_candidate(presentation, event, state,
+                                                           static_cast<double>(event.current) /
+                                                               static_cast<double>(event.total),
+                                                           0, true, true, true));
             }
             return;
         }
-        case StartupStatus::Complete:
+        case StartupStatus::Complete: {
             progress->clear();
-            if (event.progress_unit == StartupProgressUnit::Bytes) {
-                logger->info("startup phase={} status=complete completed_bytes={} total_bytes={} "
-                             "duration_ms={:.3f}",
-                             phase, event.current, event.total,
-                             static_cast<double>(event.elapsed_ns) / 1.0e6);
+            if (event.phase == StartupPhase::EngineStartup) {
+                engine_elapsed_ns = event.elapsed_ns;
+                return;
+            }
+            const std::string line = complete_line(presentation, event);
+            if (presentation.visibility == PhaseVisibility::Info) {
+                logger->info("{}", line);
             } else {
-                logger->info("startup phase={} status=complete duration_ms={:.3f}", phase,
-                             static_cast<double>(event.elapsed_ns) / 1.0e6);
+                logger->debug("{}", line);
             }
             return;
+        }
         case StartupStatus::Failed:
             progress->clear();
-            if (event.progress_unit == StartupProgressUnit::Bytes) {
-                logger->error("startup phase={} status=failed submitted_bytes={} total_bytes={} "
-                              "duration_ms={:.3f}",
-                              phase, event.current, event.total,
-                              static_cast<double>(event.elapsed_ns) / 1.0e6);
-            } else {
-                logger->error("startup phase={} status=failed duration_ms={:.3f}", phase,
-                              static_cast<double>(event.elapsed_ns) / 1.0e6);
-            }
+            if (failure_logged) { return; }
+            failure_logged = true;
+            logger->error("startup failed | {} | {}", presentation.active,
+                          format_pretty_duration(static_cast<double>(event.elapsed_ns) * 1.0e-9));
             return;
         }
     }
@@ -241,6 +266,8 @@ struct StartupLogRenderer::Impl {
     std::shared_ptr<spdlog::logger> logger;
     std::shared_ptr<TerminalProgress> progress;
     std::array<PhaseProgress, kStartupPhaseCount> phases;
+    std::uint64_t engine_elapsed_ns = 0;
+    bool failure_logged             = false;
 };
 
 StartupLogRenderer::StartupLogRenderer(LoggingRuntime& logging)
@@ -256,14 +283,20 @@ StartupObserver StartupLogRenderer::observer() {
 
 void StartupLogRenderer::engine_ready(const LoadSummary& load) {
     impl_->progress->clear();
-    impl_->logger->info(
-        "engine status=ready target={} model_id={} weights_id={} target_load_ms={:.3f} "
-        "materialization_pipeline_ms={:.3f} artifact_bytes_read={} host_to_device_bytes={} "
-        "peak_staging_bytes={} tensors={} resources={}",
-        quote_log_value(load.target), quote_log_value(load.model_id),
-        quote_log_value(load.weights_id), load.load_seconds * 1000.0, load.upload_seconds * 1000.0,
-        load.artifact_bytes_read, load.host_to_device_bytes, load.peak_staging_bytes,
-        load.tensor_count, load.resource_count);
+    const double total_seconds = impl_->engine_elapsed_ns != 0
+                                     ? static_cast<double>(impl_->engine_elapsed_ns) * 1.0e-9
+                                     : load.load_seconds;
+    impl_->logger->info("engine ready | {}/{} | total {} | weights {}",
+                        format_pretty_text(load.model_id), format_pretty_text(load.weights_id),
+                        format_pretty_duration(total_seconds),
+                        format_pretty_bytes(load.host_to_device_bytes));
+    impl_->logger->debug(
+        "load detail | target {} | artifact read {} | H2D {} | staging peak {} | tensors {} | "
+        "resources {}",
+        format_pretty_text(load.target), format_pretty_bytes(load.artifact_bytes_read),
+        format_pretty_bytes(load.host_to_device_bytes),
+        format_pretty_bytes(load.peak_staging_bytes), format_pretty_count(load.tensor_count),
+        format_pretty_count(load.resource_count));
 }
 
 } // namespace ninfer::product

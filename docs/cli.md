@@ -20,13 +20,14 @@ The examples use Qwen3.8-27B NVFP4 with FP8 KV storage.
 Exactly one of `--prompt` and `--messages` is required. The CLI normally omits `--kv-capacity`, so
 the shared Main Text KV pool follows the example's 32,768-token `--max-context`.
 
-Answer content is streamed to stdout. Shared structured startup/runtime-error records are written
-to stderr. Reasoning and the CLI result report (timings, throughput, GPU memory, token IDs when
-requested, and speculative-decoding statistics) also use stderr but remain unprefixed product
-output, so stdout can be redirected independently. On a terminal, weight materialization is shown
-as one transient progress line coordinated with those records. Redirected stderr contains only
-persistent structured phase records, including rate-limited progress for long loads. Option and
-local prompt/message input failures remain direct command diagnostics:
+Answer content is streamed to stdout. Human-readable startup milestones and runtime errors are
+written to stderr without service timestamps. Reasoning and the CLI result report (timings,
+throughput, GPU memory, token IDs when requested, and speculative-decoding statistics) also use
+stderr as unprefixed product output, so stdout can be redirected independently. On a terminal,
+weight materialization is one transient progress line followed by a compact Engine-ready summary.
+Redirected stderr contains persistent readable progress for long loads and no carriage returns or
+ANSI escapes. `--log-level debug` exposes every startup phase. Option and local prompt/message input
+failures remain direct command diagnostics:
 
 ```bash
 ./build/apps/ninfer models/qwen3_8_27b_nvfp4.ninfer \
@@ -78,8 +79,7 @@ output capacity for the inserted suffix and the answer:
 GPU residency is frozen when the Engine starts:
 
 - no `--spec` omits MTP/DFlash weights and state and the optimized proposal head;
-- `--spec mtp` loads only MTP, while `--spec dflash` loads only the 35B-A3B text-only DFlash
-  backend;
+- `--spec mtp` loads only MTP, while `--spec dflash` loads only the 35B-A3B DFlash backend;
 - a speculative backend with the full proposal head omits the optimized proposal head;
 - Vision is disabled by default, omitting its weights and Vision-specific unified-workspace extent;
 - `--vision` loads the weights, expands the one Program workspace for Vision encode/handoff, and
@@ -87,9 +87,11 @@ GPU residency is frozen when the Engine starts:
 - the one-request CLI uses root-only context mode, so it does not reserve an extra Device
   checkpoint StateImage or capture a continuation that no later request could consume.
 
-The complete `.ninfer` inventory is still validated. These choices are not lazy loading: a
-text-only Engine rejects media and cannot enable Vision later. DFlash and Vision are mutually
-exclusive. The default speculative and Vision settings produce the smallest resident profile.
+The complete `.ninfer` inventory is still validated. These choices are not lazy loading: an Engine
+started without Vision rejects media and cannot enable Vision later. DFlash and Vision may be
+enabled together; DFlash applies to generated-text decode after multimodal prefill and does not
+accelerate Vision encode. The default speculative and Vision settings produce the smallest resident
+profile.
 
 ## Structured messages
 
@@ -153,8 +155,8 @@ long-decode, and long-context inputs.
 ## Speculative decoding
 
 Speculative decoding is disabled by default. Select MTP with one to five draft positions, or the
-35B-A3B text-only DFlash backend with one to fifteen. `--lm-head-draft` selects the optimized
-proposal head and requires a selected backend:
+35B-A3B DFlash backend with one to fifteen. DFlash may be combined with `--vision`.
+`--lm-head-draft` selects the optimized proposal head and requires a selected backend:
 
 ```bash
 ./build/apps/ninfer models/qwen3_6_35b_a3b.ninfer \
@@ -192,7 +194,7 @@ The table lists executable defaults. The examples above select FP8 KV and MTP3.
 | `--prefill-chunk N` | positive text-prefill chunk, in multiples of 128 | `1024` |
 | `--max-new N` | requested output-token limit | `128` |
 | `--device N` | CUDA device index | `0` |
-| `--kv-dtype bf16\|int8\|fp8\|rk8v4\|rk4v4\|rk4v4-e8\|rk2v4-e8` | KV-cache storage; rotated and E8-lattice modes trade key/value precision for capacity | `bf16` |
+| `--kv-dtype bf16\|int8\|fp8\|nvfp4\|k8v4\|rk8v4\|rk4v4\|rk4v4-e8\|rk2v4-e8` | KV-cache storage; rotated and E8-lattice modes trade key/value precision for capacity; `nvfp4` and `k8v4` are upstream sm_120a modes, not available on the RTX 4090 | `bf16` |
 | `--spec mtp\|dflash` | speculative backend | off |
 | `--draft-tokens N` | MTP `1..5`; DFlash `1..15` | unset |
 | `--lm-head-draft` | optimized proposal head | off |

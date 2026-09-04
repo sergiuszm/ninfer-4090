@@ -6,16 +6,17 @@
 
 #include <spdlog/logger.h>
 
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <filesystem>
 #include <csignal>
-#include <cstddef>
 #include <exception>
 #include <iostream>
 #include <memory>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <utility>
 
 namespace {
@@ -25,6 +26,47 @@ std::atomic<ninfer::serve::HttpServer*> g_server{nullptr};
 void handle_signal(int) {
     ninfer::serve::HttpServer* server = g_server.load();
     if (server != nullptr) { server->stop(); }
+}
+
+// Fork-local: render one string as a single quoted key=value field value for the structured
+// boot lines below (upstream's readable-log rewrite dropped its logging.h helper). Structural
+// escaping only; callers decide whether a value is safe to log at all.
+std::string quote_log_value(std::string_view value) {
+    constexpr std::array<char, 16> hex = {'0', '1', '2', '3', '4', '5', '6', '7',
+                                          '8', '9', 'a', 'b', 'c', 'd', 'e', 'f'};
+    std::string out;
+    out.reserve(value.size() + 2);
+    out.push_back('"');
+    for (const unsigned char ch : value) {
+        switch (ch) {
+        case '"':
+            out += "\\\"";
+            break;
+        case '\\':
+            out += "\\\\";
+            break;
+        case '\n':
+            out += "\\n";
+            break;
+        case '\r':
+            out += "\\r";
+            break;
+        case '\t':
+            out += "\\t";
+            break;
+        default:
+            if (ch < 0x20 || ch == 0x7f) {
+                out += "\\x";
+                out.push_back(hex[ch >> 4]);
+                out.push_back(hex[ch & 0x0f]);
+            } else {
+                out.push_back(static_cast<char>(ch));
+            }
+            break;
+        }
+    }
+    out.push_back('"');
+    return out;
 }
 
 const char* kv_capacity_mode_name(ninfer::KvCapacityMode mode) noexcept {
@@ -75,9 +117,9 @@ void log_engine_capacity(const std::shared_ptr<spdlog::logger>& logger,
         "weights_id={}",
         ninfer::context_cost_preset_source_name(context_cost.transfer_source),
         ninfer::context_cost_preset_source_name(context_cost.prefill_source),
-        ninfer::product::quote_log_value(context_cost.hardware_class),
-        ninfer::product::quote_log_value(context_cost.model_id),
-        ninfer::product::quote_log_value(context_cost.weights_id));
+        quote_log_value(context_cost.hardware_class),
+        quote_log_value(context_cost.model_id),
+        quote_log_value(context_cost.weights_id));
     if (options.enable_vision) {
         const ninfer::MediaCacheSummary media = service.media_cache_summary();
         logger->info(
@@ -105,9 +147,13 @@ int main(int argc, char** argv) {
         return 0;
     }
 
-    ninfer::product::LoggingRuntime logging({.logger_name = "ninfer-serve"});
+    ninfer::product::LoggingRuntime logging(
+        {.logger_name  = "ninfer-serve",
+         .level        = options.log_level,
+         .presentation = ninfer::product::LogPresentation::Service});
     const std::shared_ptr<spdlog::logger> logger = logging.logger();
     ninfer::product::StartupLogRenderer startup_log(logging);
+    ninfer::serve::OperationalLog operational_log(logger);
     bool serving = false;
 
     if (options.deprecated_turn_checkpoints_given) {
@@ -121,7 +167,7 @@ int main(int argc, char** argv) {
         if (directory_error ||
             !std::filesystem::is_directory(options.slot_save_path, directory_error)) {
             logger->error("--slot-save-path is not a usable directory: {}",
-                          ninfer::product::quote_log_value(options.slot_save_path));
+                          quote_log_value(options.slot_save_path));
             return 1;
         }
     }
@@ -129,8 +175,7 @@ int main(int argc, char** argv) {
     try {
         ninfer::serve::HttpServer server(options, logger);
         if (!server.bind()) {
-            logger->error("server status=failed phase=bind host={} port={}",
-                          ninfer::product::quote_log_value(options.host), options.port);
+            operational_log.bind_failure(options.host, options.port);
             return 1;
         }
 
@@ -141,19 +186,17 @@ int main(int argc, char** argv) {
 
         using Clock                            = std::chrono::steady_clock;
         const Clock::time_point warmup_started = Clock::now();
-        logger->info("startup phase=serve-warmup status=begin");
+        operational_log.warmup_started();
         try {
             service.warmup();
         } catch (const std::exception& exception) {
-            const double duration_ms =
-                std::chrono::duration<double, std::milli>(Clock::now() - warmup_started).count();
-            logger->error("startup phase=serve-warmup status=failed duration_ms={:.3f} detail={}",
-                          duration_ms, ninfer::product::quote_log_value(exception.what()));
-            throw;
+            const double seconds =
+                std::chrono::duration<double>(Clock::now() - warmup_started).count();
+            operational_log.warmup_failure(seconds, exception.what());
+            return 1;
         }
-        logger->info(
-            "startup phase=serve-warmup status=complete duration_ms={:.3f}",
-            std::chrono::duration<double, std::milli>(Clock::now() - warmup_started).count());
+        operational_log.warmup_complete(
+            std::chrono::duration<double>(Clock::now() - warmup_started).count());
         server.attach(service);
 
         g_server.store(&server);
@@ -161,24 +204,20 @@ int main(int argc, char** argv) {
         std::signal(SIGTERM, handle_signal);
 
         serving = true;
-        logger->info("server status=ready host={} port={} model_id={} auth_enabled={}",
-                     ninfer::product::quote_log_value(options.host), options.port,
-                     ninfer::product::quote_log_value(server.public_model_id()),
-                     !options.api_key.empty());
+        operational_log.server_ready(options.host, options.port, server.public_model_id(),
+                                     !options.api_key.empty());
 
         const bool ok = server.listen();
         g_server.store(nullptr);
         if (!ok) {
-            logger->error("server status=failed phase=listen host={} port={}",
-                          ninfer::product::quote_log_value(options.host), options.port);
+            operational_log.listen_failure(options.host, options.port);
             return 1;
         }
-        logger->info("server status=stopped");
+        operational_log.server_stopped();
         return 0;
     } catch (const std::exception& exception) {
         g_server.store(nullptr);
-        logger->critical("server status=failed phase={} detail={}", serving ? "serving" : "startup",
-                         ninfer::product::quote_log_value(exception.what()));
+        operational_log.server_failure(serving, exception.what());
         return 1;
     }
 }
