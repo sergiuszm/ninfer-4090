@@ -90,6 +90,32 @@ an RTX 5090"): it may be the sm_89 form of the Don-Chad `7afc8e17` row still ope
 which needs `DeviceContext::sm_count()`, our own per-SM occupancy figures and a
 `kMinSupportedSmCount`.
 
+## Upstream catch-up 2026-09-05: `neroued/master` `ad0f3d38` merged
+
+Merge commit on `recon/catchup-20260904` (worktree `ninfer-recon`), 20 upstream commits since
+`5438b743`. Full inventory and every decision: `ninfer-recon-notes/CATCHUP-20260904.md`.
+
+What rode along and how it landed:
+
+| Item | Outcome |
+|---|---|
+| `a140e7ae` exact agent prefix reuse, `b8786751` aliased state ownership | Merged; `engine_core.h` auto-merged, `program_impl.h` two trivial hunks. `b8786751` removed `SequenceState::state_source_retained`; our restore path stopped assigning it. Default shared capacity is now `max(max_concurrency, 4)`; production pins `--max-shared-prefixes 1`, so its geometry is unchanged |
+| `4ac73c47`, `21a0e85f`, `a2761ec1` KV-cache restructure | **Interface adopted, kernels kept.** `KvCacheStorage` + `PagedKVStorageLayout` replace the flag bag everywhere; the four fork modes are described in `paged_kv_storage.h` and `kv_fork_mode_flags()` feeds our unchanged int8/E8 kernels. fp16 V storage for the bf16 mode adopted (35 files; no production path). The fork's two-phase bf16 prompt kernel (`694e01f0`) was DROPPED for upstream's bf16 kernels - re-port only if bf16-mode prefill on the 4090 ever matters. nvfp4/k8v4 kernels are excluded on sm_89 (`cvt.e2m1x2`), stubbed, and the modes are rejected at startup |
+| `550d0ac3` llama.cpp timings + prompt progress | Upstream's `timings` block replaces ours (superset minus `ttft_ms`, which nothing consumed); `id_slot`/`session_digest` kept |
+| `5f6d44e4` health readiness | `/health` is 503 until the service attaches and after a latched failure; our latch check kept |
+| `6e2786c5` readable operational logs | Upstream's prose capacity lines NOT used; our structured `engine capacity/context_cache/state_pools` boot lines kept in `apps/serve/main.cpp` (`quote_log_value` re-homed there). The request done line is upstream's prose (it now carries MTP acceptance and thinking accounting itself); the fork's 09-01 structured suffix (`speculative_*`, `host_exposed_ms`, `decode_*_us_per_round`, `thinking_*`) is DROPPED - every field is in the request JSONL. LOG-CONTRACT.md refresh is a phase-2 item |
+| `e51b585c` cooperative launch capacity | Mechanism adopted (runtime SM count, tile partitioning); our sm_89 route bounds kept, our hand-rolled residency predicates deleted |
+| `3b50962b`, `0c5d570c`, `719d56ef` tool-call frontend; `e3aeaf8c`; `f0eb3ac7` httplib 0.54.1; `863aa8a5`; perf and fixture commits | Merged clean |
+| `5973313d` self-contained frontend fixtures | Our official-tokenizer test gate removed; `NINFER_QWEN3_6_27B_HF_DIR` no longer needed by the frontend test |
+
+Also taken in the same pass: 3090 base `5820660d` (pairwise K reduction in the unsplit GDN
+gating projection, cherry-picked clean; the numerics miss it fixes is the one our own
+`test_gdn_gating_proj.cpp` comment documents at the T=2689 onset).
+
+Deliberately NOT taken: the fork's two-phase bf16 prompt kernel (see above), the request-line
+suffix (see above), `ttft_ms` in the chat `timings` block (nothing consumed it), the
+200-before-attach `/health` behavior.
+
 ## Inbound sweep 2026-09-04 (all remotes and forks)
 
 Survey of `neroued/master` (upstream), `Don-Chad/ninfer-3090` (the 3090 base),
