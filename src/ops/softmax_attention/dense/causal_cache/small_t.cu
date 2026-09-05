@@ -62,7 +62,7 @@ std::int32_t causal_small_t_split_count(std::int32_t window, std::int32_t tokens
     }
     // Bc=64 is one CTA/SM on these model shapes. Keep the 8K grid at or below
     // one 170-SM wave after accounting for the geometry's KV-head count.
-    if (storage == KvCacheStorage::Int8Group64 && tokens == 6 && window > 5000 && window <= 8198) {
+    if (kv_storage_is_int8_family(storage) && tokens == 6 && window > 5000 && window <= 8198) {
         const std::int32_t splits   = div_up(window, 192 / Geometry::SmallTSplitScale);
         constexpr std::int32_t kMin = 4 * Geometry::SmallTSplitScale;
         constexpr std::int32_t kMax = 42 * Geometry::SmallTSplitScale;
@@ -367,7 +367,9 @@ void causal_attention_small_t_launch_for(const Tensor& q, CacheInput input, cons
             launch_profile.template operator()<PartialAcc, Int8, true, false>();
         }
     };
-    if (cache.storage == KvCacheStorage::Int8Group64) {
+    // Every int8-family mode (Int8Group64 and the fork's packed/rotated/E8 modes) runs
+    // launch_tc_partial_i8, which writes bf16 partials; the reduce must read them as such.
+    if (kv_storage_is_int8_family(cache.storage)) {
         launch_for_dtype.template operator()<__nv_bfloat16, true>();
     } else {
         launch_for_dtype.template operator()<float, false>();

@@ -32,6 +32,23 @@ ninfer::EngineOptions engine_options(const char* artifact) {
     return options;
 }
 
+// Fork-local: NINFER_PREFIX_REAL_KV_DTYPE selects the KV-cache storage every engine under test
+// uses (default fp8, upstream's choice). The production mode is rk4v4-e8, whose small-T decode
+// path no unit test covers, so the GPU window runs this E2E on it.
+ninfer::KvCacheStorage kv_cache_under_test() {
+    const char* value = std::getenv("NINFER_PREFIX_REAL_KV_DTYPE");
+    if (value == nullptr || *value == '\0') { return ninfer::KvCacheStorage::Fp8E4M3Row256; }
+    const std::string_view text(value);
+    if (text == "bf16") { return ninfer::KvCacheStorage::BFloat16; }
+    if (text == "int8") { return ninfer::KvCacheStorage::Int8Group64; }
+    if (text == "fp8") { return ninfer::KvCacheStorage::Fp8E4M3Row256; }
+    if (text == "rk8v4") { return ninfer::KvCacheStorage::RotatedInt8KeyInt4ValueGroup64; }
+    if (text == "rk4v4") { return ninfer::KvCacheStorage::RotatedInt4KeyInt4ValueGroup64; }
+    if (text == "rk4v4-e8") { return ninfer::KvCacheStorage::RK4V4E8; }
+    if (text == "rk2v4-e8") { return ninfer::KvCacheStorage::RK2V4E8; }
+    throw std::invalid_argument("NINFER_PREFIX_REAL_KV_DTYPE: unknown KV-cache storage");
+}
+
 ninfer::EngineOptions host_restore_engine_options(const char* artifact) {
     ninfer::EngineOptions options;
     options.artifact_path                        = artifact;
@@ -97,7 +114,7 @@ ninfer::EngineOptions shared_rewrite_materialization_engine_options(const char* 
     options.max_context                      = 100000;
     options.kv_capacity                      = ninfer::KvCapacityPolicy::explicit_capacity(100000);
     options.prefill_chunk                    = 1024;
-    options.kv_cache                         = ninfer::KvCacheStorage::Fp8E4M3Row256;
+    options.kv_cache                         = kv_cache_under_test();
     options.speculative.backend              = ninfer::SpeculativeBackend::Mtp;
     options.speculative.draft_tokens         = 3;
     options.speculative.proposal_head        = ninfer::ProposalHead::Optimized;
@@ -176,7 +193,7 @@ ninfer::EngineOptions pressure_resume_engine_options(const char* artifact) {
     options.max_context                      = 8192;
     options.kv_capacity                      = ninfer::KvCapacityPolicy::explicit_capacity(8192);
     options.prefill_chunk                    = 1024;
-    options.kv_cache                         = ninfer::KvCacheStorage::Fp8E4M3Row256;
+    options.kv_cache                         = kv_cache_under_test();
     options.speculative.backend              = ninfer::SpeculativeBackend::None;
     options.max_concurrency                  = 2;
     options.max_pending_requests             = 2;
@@ -195,7 +212,7 @@ ninfer::EngineOptions private_checkpoint_pressure_engine_options(const char* art
     options.max_context                      = 8192;
     options.kv_capacity                      = ninfer::KvCapacityPolicy::explicit_capacity(16384);
     options.prefill_chunk                    = 1024;
-    options.kv_cache                         = ninfer::KvCacheStorage::Fp8E4M3Row256;
+    options.kv_cache                         = kv_cache_under_test();
     options.speculative.backend              = ninfer::SpeculativeBackend::None;
     options.max_concurrency                  = 2;
     options.max_pending_requests             = 2;
