@@ -116,6 +116,92 @@ Deliberately NOT taken: the fork's two-phase bf16 prompt kernel (see above), the
 suffix (see above), `ttft_ms` in the chat `timings` block (nothing consumed it), the
 200-before-attach `/health` behavior.
 
+## Wave 1 (2026-09-07): small correctness picks from the sweep, branch `fix/wave1-20260907`
+
+Base `6f327f49` (= production `catchup-6f327f49`). Cherry-picked with `-x`; every pick was read
+against this tree, not just applied.
+
+| Source | Landed as | Notes |
+|---|---|---|
+| upstream PR #211 `036511d8` (ranxianglei) | `e565fe50` | Clean. `activate()` and `commit_activation()` take the compute stream; both `program_impl.h` call sites pass `device.stream`. Closes the #210 crash class in our `logical_kv_store.h` |
+| 0xrjman `cbf51152` stale-plan drop | `02d0976d` + `87230fd9` | Two trivial conflicts (our extra test fixtures; the `state_count` line). The regression scenario `shared-release-source` was written for the nvfp4 artifact; `87230fd9` runs it on the groupwise artifact and on `NINFER_PREFIX_REAL_KV_DTYPE` like the other fork fixtures |
+| gzenz `839e5226` reasoning-effort tiers | `51bf3597` | Clean. `minimal -> low`, `high/max -> xhigh` instead of 400 |
+| 0xrjman `54acc835` trigger-B footprint | **dropped** | Patches `state_footprint()` and `state_source_retained`, both removed by upstream `b8786751` (aliased state ownership), which we merged on 09-05. The double count it fixes cannot occur in the exclusive-resource accounting |
+| gzenz `ff372161` checkpoint budget pre-check | **dropped** | Patches gzenz's own checkpoint-copy block (their `1b11452c`); this tree has neither the block nor `state_footprint()` |
+| tensorninja `e3a129c3` restore diagnostics | **deferred** | Instruments `restore_could_be_hosted()` and the deferred-retry gate of their `c1e4eb1e`, which this tree does not have (`concurrent_executor.h` is gone since the 08-30 merge). A design port onto `engine_core.h`'s restore path, not a cherry-pick |
+
+Validation: CPU build in `ninfer-catchup` (`-DNINFER_BUILD_BENCHMARKS=ON` now, for
+`ninfer_context_cost_bench`), then the GPU window `ninfer-recon-notes/deploy-20260907/run-gpu-window-wave1.sh`
+(full ctest, three real-model E2E scenarios on rk4v4-e8 including the new one, fresh-server A/B
+vs the production binary, effort=high/minimal must be 200, restore of a production slot copy,
+and a 4090 context-cost calibration run). Results below when the window has run.
+
+## Inbound sweep 2026-09-07 (all remotes, upstream issues, forks of this repo, active forks of upstream)
+
+Counts are commits absent from `rtx4090-port` at `6f327f49` (= production `catchup-6f327f49`).
+Bodies were read; applicability was checked against this tree. The 3090 base, UDP, shantanu and
+the probe remotes have nothing new since 2026-09-03.
+
+### Upstream `neroued/master`: 84 commits since `ad0f3d38` (all 2026-09-06/07)
+
+- **DFlash2** (dominant: `src/ops` 144 files, `tests/ops` 46, converter, model cards): a new
+  speculative backend with companion draft weights. Needs a NEW artifact (`qwen3_8_27b.ninfer`
+  sha `0634abb0…`, 19.03 GiB, minimum runtime `385b30ce`, `--spec dflash2 --draft-tokens 7`);
+  verified on the 5090 only (`docs/maintainer/qwen3.8-27b-dflash2.md`). The current artifact
+  keeps working (dflash2 weights bind optionally). Value unknown on Ada until benched against
+  MTP3; the next catch-up merge will be large but mostly additive under `src/ops`.
+- `03177b91` fix(runtime) preserve kv coverage during speculative terminal settlement: DFlash
+  and DFlash2 page-boundary state; the MTP hunks are a `materialize_sequence_kv` ->
+  `ensure_sequence_kv_mapped` rename only. Low for production.
+- Generic perf worth a kernel-bench: `6d1da9ce` q5 linear add aggregate cliff, `22d8a1d3` w8
+  vocabulary t64 route, `487f8977` sparse_moe (n/a, dense). Bench-first rule stands.
+
+### Upstream open issues and PRs in our area
+
+| Item | What | Value |
+|---|---|---|
+| **#210 issue + #211 PR** (ranxianglei) | Hard crash (device-side assert, GPU lockup) on real agent workloads: `commit_activation()` ran the paged-cache membership publish on stream 0, unordered vs the compute stream. **Our `logical_kv_store.h:894-901` has the exact vulnerable pattern** (adopted with `a2761ec1`). Fix = thread `cudaStream_t` through `activate()`, pass `device.stream` at both `program_impl.h` call sites (+6/-4). | **High, small; 0 crashes here in 2 days but the race is real** |
+| **#176-#180 issues** (splickz, 09-04/05) | The materialization cluster we fought as D1: 5 ms search ceiling (#176 = our `fix/d1-planner-search-budget`), private cache permanently saturated across conversations (#177 = the 2-cell thrash), planner charges transition loss for unreachable checkpoints (#178), infeasible shared captures (#179), rolling retention proposal (#180). #181 (closed) = small interleaved requests evict the conversation prefix. | Read before D1b; our automatic anchors (`--auto-long-anchors`) and the JSONL `best_reuse_prompt_tokens` are evidence worth posting there |
+| **#175 issue** (closed) | 3090 ran on the 5090 cost profile, prefill predicted 2.3x too low. **We run `prefill_source=generic-default transfer_source=generic-default` for `hardware_class=nvidia-geforce-rtx-4090-sm89`** (boot line), so every planner cost prediction on the 4090 is uncalibrated. `context_cost.cpp` accepts an external preset file. | Medium: calibrate a 4090 preset, then re-read the D1 planner numbers |
+| #195 PR | Fall back to a preset of the same weights format when no (model, weights) row matches | Low once we ship our own preset |
+| **#152 PR** (+65/-7, serve only) | Automatic shared-prefix write at the system/developer frontier; closes #142 (agent siblings miss the shared head without `prompt_cache_breakpoint`). pi sends no breakpoint. | Medium for multi-session pi; small port |
+| #173 PR (danielfparkernz, +4131) | rk2v4-e8 re-port onto upstream's paged-KV engine, 208 B/head-token | Watch: if merged, our E8 layer can converge with upstream |
+| #162/#163 (hecrj), #197 ignore_eos, #183 `--chat-template FILE`, #148 Responses API | serve conveniences | Low |
+
+### Forks of this repository (13)
+
+tensorninja `+31` (09-03: board energy attribution; `e3a129c3` restore diagnostics still the
+pick), pxzleo `+35` (UI themes, n/a), KasoLu and alin-o new at `+0`. Nothing else moved.
+
+### Active forks of upstream with own commits (278 forks; 20 pushed after 09-03 checked)
+
+| Fork | What | Decision |
+|---|---|---|
+| **soohl/ninfer** `+2` (09-05/06, +6k lines) | An independent RTX 4090 port of upstream with E8 KV, 262K, vision, MTP3: **INT8 group-64 activations for the dense prefill = 3,548-3,684 tok/s at 8K vs 2,111 A16 (+68%)**, decode/MTP verify stay A16, artifact unchanged; cooperative grid from measured Ada occupancy; rejected FP8 PV and larger E8 query tiles; perplexity evidence in `docs/ada.md`. Our production prefills at ~2,000 tok/s. | **High. Bench-first + quality gate** (llm-eval + tool-eval-bench, temp-0 A/B): lossy INT8 prefill is a product decision. Port the prefill route only, not their E8 (ours is qualified) |
+| **gzenz/ninfer** `+50` (11 stars, 5090/NVFP4, 3 agent sessions at 555K) | Host-KV safety net (`--host-kv-mib`, spill evicted continuations to a pinned host arena, restore on reuse); rewrite checkpoint captured at the turn boundary; checkpoint retained when state-slot reservation fails; **pre-check slot budget before creating a checkpoint** (`ff372161`, 1 file); OOM recovery in the worker loop; reasoning-effort tier mapping (Claude Code sends `high` -> 400 today, `839e5226`, 1 file); NVTX ranges for MTP decode; monitor dashboard. | Medium: the checkpoint-budget and effort-mapping fixes are one-file ports; the safety net competes with the xkeyC design port (compare before choosing) |
+| **0xrjman/ninfer** `+6` | `cbf51152` stale-plan requests are dropped instead of killing the worker (which latched the engine into permanent 503 until restart; +206, 3 files, with a real-request regression); `54acc835` `state_footprint()` double-counted the retained fork source when read==write (entitlement invariant throw); `15f07fa4` on-site diag markers; Codex Responses extensions. | **High for availability**, medium size; the footprint bug lives in `b8786751` code we merged |
+| BenWu `+99` | Two-device layer pipeline; context-cost preset misses surfaced | n/a (single GPU); the preset-miss logging is the #175 theme |
+| cometkim `+39` | Own DFlash2 line (superseded by upstream's), width-8 int8 verify tile, `meta.n_ctx` on /v1/models | Low |
+| kaushikvira `+10` | Ports of PRs #61, #160, Responses items, DFlash2 graft tool | Low |
+| Gevil `+272` | `ADOPTION.md`: a curated, tiered adoption record of the whole fork ecosystem (T-numbered) | Read as an index, port nothing |
+| aljazceru `+18` (08-20) | sm_86 A5000 port, INT4-G64 KV, pinned-host embedding offload | Low |
+| troubadour-hell, plugmind-dev, Xtravaganz, sunnyyangyangyang | Windows, WSL bridge, syncs | n/a |
+
+### Recommended order
+
+1. **#211** stream-ordered membership publish: cherry-pick, ctest, deploy in the next window
+   (crash class, 3 lines).
+2. **soohl INT8 dense prefill**: kernel-bench + temp-0 quality A/B on the 4090; ship only if
+   the quality gate holds (+68% prefill would take the 131K TTFT from 89 s to ~53 s).
+3. **0xrjman** stale-plan drop + footprint fix (availability), with their regression test.
+4. tensorninja `e3a129c3` restore diagnostics (unchanged from the 09-04 order).
+5. gzenz one-file fixes (`ff372161` checkpoint budget pre-check, `839e5226` effort tiers) and
+   #152 auto shared prefix.
+6. Calibrate a 4090 context-cost preset (#175 class), then D1b / the #176-#180 cluster with
+   `best_reuse_prompt_tokens` in hand; post our findings on #176/#177.
+7. xkeyC `14faf879` + the host prefix cache design port vs gzenz's safety net: pick one.
+8. Next upstream catch-up (DFlash2, 84 commits) only with the new artifact and a bench plan.
+
 ## Inbound sweep 2026-09-04 (all remotes and forks)
 
 Survey of `neroued/master` (upstream), `Don-Chad/ninfer-3090` (the 3090 base),
