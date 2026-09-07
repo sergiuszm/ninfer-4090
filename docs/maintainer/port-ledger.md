@@ -134,7 +134,27 @@ Validation: CPU build in `ninfer-catchup` (`-DNINFER_BUILD_BENCHMARKS=ON` now, f
 `ninfer_context_cost_bench`), then the GPU window `ninfer-recon-notes/deploy-20260907/run-gpu-window-wave1.sh`
 (full ctest, three real-model E2E scenarios on rk4v4-e8 including the new one, fresh-server A/B
 vs the production binary, effort=high/minimal must be 200, restore of a production slot copy,
-and a 4090 context-cost calibration run). Results below when the window has run.
+and a 4090 context-cost calibration run).
+
+**Window 2026-09-07 18:39-18:47 UTC: all gates passed; DEPLOYED 18:48 UTC as `wave1-6f1399c9`.**
+ctest 109/109 (99 ran, 10 skipped: 35B/score/load-plan without weights, nvfp4/k8v4, A4);
+E2E on rk4v4-e8 `ok` x3 (default, automatic-private-anchors, shared-release-source with
+`dropped=0` on every round); boot geometry identical; effort=high and effort=minimal 200 on the
+new server; production slot copy restored `n_restored=32324 session=30447b168cab0f2c` = ref;
+A/B vs the 6f327f49 binary on fresh servers: prefill +0.6..0.9%, cache hits identical
+(15,168 / 15,190), 49k round-trip flat (save -1.3%, restore +0.3%), decode within content noise
+(the probes carry a per-run nonce, so acceptance counts are not comparable across runs). One
+outlier: the 16k save took 869 ms vs 602 ms; the 49k save was flat and the order was new-first
+this time (ref-first on 09-05 showed the opposite sign), so it reads as page-cache order, not
+the binary. 0 warnings. Rollback binary `ninfer-serve.pre-wave1-6f1399c9-20260907-1848`.
+
+Context-cost calibration (`ninfer_context_cost_bench --suite all`, default reps): **prefill fit
+accepted** (p95 relative error 1.4% training / 4.3% held-out, ordering 50/50 + 10/10), d2h and
+h2d fits accepted (p95 19-27%), **d2d fit rejected** (p95 54% / 64%: 4-64 MB contiguous copies
+in 1-8 operations measured 2x the model), so no preset file was written. Re-run queued with
+`--transfer-warmup 6 --transfer-reps 41 --prefill-reps 7` (see the line below when it lands).
+The bench refuses a partial preset; if d2d never fits, hand-assemble one from the accepted
+components in `context_cost_4090*.json` (schema: `context_cost.cpp` `parse_context_cost_presets`).
 
 ## Inbound sweep 2026-09-07 (all remotes, upstream issues, forks of this repo, active forks of upstream)
 
