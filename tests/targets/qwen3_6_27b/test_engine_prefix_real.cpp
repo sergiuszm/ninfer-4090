@@ -135,6 +135,7 @@ ninfer::EngineOptions shared_release_source_engine_options(const char* artifact)
     options.max_context                          = 1024;
     options.kv_capacity = ninfer::KvCapacityPolicy::explicit_capacity(1024);
     options.prefill_chunk                        = 256;
+    options.kv_cache                             = kv_cache_under_test();
     options.speculative.backend                  = ninfer::SpeculativeBackend::None;
     options.max_concurrency                      = 4;
     options.max_pending_requests                 = 16;
@@ -2806,11 +2807,13 @@ int main() {
         return result;
     }
     if (scenario != nullptr && std::string_view(scenario) == "shared-release-source") {
-        if (qwen38_nvfp4 == nullptr || *qwen38_nvfp4 == '\0') {
-            std::cerr << "shared-release-source requires NINFER_QWEN3_8_27B_NVFP4_WEIGHTS\n";
+        // Fork-local: the scenario is about shared-prefix release, not the weights format, and
+        // sm_89 refuses nvfp4 at startup, so it runs on the groupwise artifact here.
+        if (qwen38_groupwise == nullptr || *qwen38_groupwise == '\0') {
+            std::cerr << "shared-release-source requires NINFER_QWEN3_8_27B_WEIGHTS\n";
             return 1;
         }
-        const int result = exercise_shared_prefix_release_keeps_private_source(qwen38_nvfp4);
+        const int result = exercise_shared_prefix_release_keeps_private_source(qwen38_groupwise);
         if (result == 0) { std::cout << "ok\n"; }
         return result;
     }
