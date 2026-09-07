@@ -153,8 +153,18 @@ accepted** (p95 relative error 1.4% training / 4.3% held-out, ordering 50/50 + 1
 h2d fits accepted (p95 19-27%), **d2d fit rejected** (p95 54% / 64%: 4-64 MB contiguous copies
 in 1-8 operations measured 2x the model), so no preset file was written. Re-run queued with
 `--transfer-warmup 6 --transfer-reps 41 --prefill-reps 7` (see the line below when it lands).
-The bench refuses a partial preset; if d2d never fits, hand-assemble one from the accepted
-components in `context_cost_4090*.json` (schema: `context_cost.cpp` `parse_context_cost_presets`).
+The re-run (`context_cost_4090_r2.json`, 41 samples) rejected d2d again with the same shape
+(p95 56.7% / 64.1%, median 4.6% / 6.7%; the multi-operation 4-64 MB contiguous copies run ~2x the
+`max(batch + ops*op_ns, bytes*ns_per_byte)` model), so the miss is the model shape on Ada, not
+noise. **Hand-assembled preset DEPLOYED 2026-09-07 18:59 UTC**: `ninfer-recon-notes/deploy-20260907/
+context_cost_presets_4090.json` (all four r2 fits, provenance notes carry the d2d caveat; the
+compiled generic default priced 4090 d2d ~10x slower than measured and prefill at the 5090 rate).
+Validated on a fresh :8087 server (`transfer_source=external prefill_source=external`, completion
+ok, 0 warnings), then production recreated with `-v ~/ninfer-deploy/context-cost:/context-cost:ro
+--context-cost-presets /context-cost/context_cost_presets_4090.json` (`recreate-containers.sh`
+edited, backup `.pre-ccost-20260907`). Boot line on production reads external/external. Watch in
+the soak: `materialization.predicted_*` and `prefix_reuse_path` in the JSONL - this is the first
+time the planner prices restores and prefills with 4090 numbers.
 
 ## Inbound sweep 2026-09-07 (all remotes, upstream issues, forks of this repo, active forks of upstream)
 
