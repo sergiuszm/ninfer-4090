@@ -892,7 +892,7 @@ ProgramImplCore::restore_continuation(std::span<const std::uint8_t> snapshot,
             if (page_count == 0) { return *address; }
             try {
                 addresses.activate(*address, page_count, *free_row);
-                addresses.materialize_to_tokens(*address, committed, device.stream);
+                addresses.ensure_mapped_to_tokens(*address, committed, device.stream);
                 addresses.commit_frontier(*address, committed);
                 std::vector<DeviceKVPageHandle> destinations;
                 destinations.reserve(page_count);

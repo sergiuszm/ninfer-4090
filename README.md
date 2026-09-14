@@ -214,6 +214,11 @@ with `media_budget_exceeded` before the request reaches the encoder. For dense
 video workloads, raise the limit with `--vision-max-tokens`. Each additional
 1024 tokens of scratchpad costs about 62 MiB of VRAM.
 
+The 35B-A3B target additionally supports DFlash with draft windows from one to fifteen for Text and
+image/video Vision prompts. Qwen3.8-27B artifacts with the DFlash2 companion weights support
+`--spec dflash2 --draft-tokens 7` for the same Text/Vision Engine path, with draft counts 1..15
+and either full or optimized proposal heads.
+
 ### The tradeoff
 
 KV precision, vision, and maximum context trade against each other on a 24 GB card:
