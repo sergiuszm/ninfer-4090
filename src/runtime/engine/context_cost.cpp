@@ -12,7 +12,13 @@
 #include <system_error>
 #include <utility>
 
+#ifdef _WIN32
+#include <process.h>
+#else
 #include <unistd.h>
+#endif
+
+#include "runtime/portable_u128.h"
 
 namespace ninfer::runtime {
 
@@ -23,7 +29,7 @@ const std::vector<ContextCostMachinePreset>& compiled_context_cost_defaults();
 namespace {
 
 using Json = nlohmann::json;
-using U128 = unsigned __int128;
+using U128 = ninfer::detail::u128;
 
 constexpr std::size_t direction_index(ContextTransferDirection direction) noexcept {
     return static_cast<std::size_t>(direction);
@@ -36,18 +42,22 @@ std::uint64_t saturating_add(std::uint64_t left, std::uint64_t right) noexcept {
 }
 
 std::uint64_t saturating_product(std::uint64_t left, std::uint64_t right) noexcept {
-    const U128 product = static_cast<U128>(left) * right;
-    return product > std::numeric_limits<std::uint64_t>::max()
+    const U128 product = ninfer::detail::u128_mul64(left, right);
+    return ninfer::detail::u128_gt(product, ninfer::detail::u128_from64(std::numeric_limits<std::uint64_t>::max()))
                ? std::numeric_limits<std::uint64_t>::max()
-               : static_cast<std::uint64_t>(product);
+               : ninfer::detail::u128_to64(product);
 }
 
 std::uint64_t q32_product_ns(std::uint64_t coefficient, std::uint64_t units) noexcept {
     if (coefficient == 0 || units == 0) { return 0; }
-    const U128 product        = static_cast<U128>(coefficient) * units;
-    const U128 maximum_scaled = static_cast<U128>(std::numeric_limits<std::uint64_t>::max()) << 32U;
-    if (product >= maximum_scaled) { return std::numeric_limits<std::uint64_t>::max(); }
-    return static_cast<std::uint64_t>((product + kContextCostQ32One - 1U) >> 32U);
+    const U128 product        = ninfer::detail::u128_mul64(coefficient, units);
+    const U128 maximum_scaled = ninfer::detail::u128_shl(
+        ninfer::detail::u128_from64(std::numeric_limits<std::uint64_t>::max()), 32);
+    if (ninfer::detail::u128_ge(product, maximum_scaled)) {
+        return std::numeric_limits<std::uint64_t>::max();
+    }
+    const U128 rounded = ninfer::detail::u128_add(product, ninfer::detail::u128_from64(kContextCostQ32One - 1U));
+    return ninfer::detail::u128_to64(ninfer::detail::u128_shr(rounded, 32));
 }
 
 void require_object(const Json& value, std::string_view context) {

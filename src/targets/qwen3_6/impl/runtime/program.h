@@ -282,7 +282,14 @@ AdmissionCandidate<NINFER_QWEN36_VARIANT>::AdmissionCandidate(AdmissionCandidate
 
 template <>
 AdmissionCandidate<NINFER_QWEN36_VARIANT>&
-AdmissionCandidate<NINFER_QWEN36_VARIANT>::operator=(AdmissionCandidate&&) noexcept = default;
+AdmissionCandidate<NINFER_QWEN36_VARIANT>::operator=(AdmissionCandidate&& rhs) noexcept {
+    // Explicit body (not `= default`): a defaulted member function is only emitted in the TU
+    // that odr-uses it, but the move-assign is odr-used from the engine's std::optional<...>
+    // operator= in a different TU, so MSVC leaves the symbol undefined (LNK2019). An explicit
+    // body is always emitted. Moving the unique_ptr is the whole operation.
+    impl_ = std::move(rhs.impl_);
+    return *this;
+}
 
 template <>
 AdmissionCandidate<NINFER_QWEN36_VARIANT>::~AdmissionCandidate() = default;
@@ -298,8 +305,12 @@ CapturePressureCandidate<NINFER_QWEN36_VARIANT>::CapturePressureCandidate(
 
 template <>
 CapturePressureCandidate<NINFER_QWEN36_VARIANT>&
-CapturePressureCandidate<NINFER_QWEN36_VARIANT>::operator=(CapturePressureCandidate&&) noexcept =
-    default;
+CapturePressureCandidate<NINFER_QWEN36_VARIANT>::operator=(CapturePressureCandidate&& rhs) noexcept {
+    // Explicit body (not `= default`): see the AdmissionCandidate note — MSVC only emits a
+    // defaulted member in the TU that odr-uses it, and the engine odr-uses this from another TU.
+    impl_ = std::move(rhs.impl_);
+    return *this;
+}
 
 template <>
 CapturePressureCandidate<NINFER_QWEN36_VARIANT>::~CapturePressureCandidate() = default;
