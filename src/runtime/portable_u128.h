@@ -13,7 +13,7 @@
 
 #include <cstdint>
 
-#if defined(__SIZEOF_INT128__)
+#if defined(__SIZEOF_INT128__) && !defined(NINFER_FORCE_PORTABLE_U128)
 // GCC / Clang: native 128-bit type. Every op is a single native op -> identical results.
 namespace ninfer {
 inline namespace detail {
@@ -57,15 +57,17 @@ inline constexpr u128 u128_add(u128 a, u128 b) noexcept { return {a.lo + b.lo, a
 inline constexpr u128 u128_sub(u128 a, u128 b) noexcept { return {a.lo - b.lo, a.hi - b.hi - (a.lo < b.lo ? 1 : 0)}; }
 inline constexpr u128 u128_shl(u128 a, int n) noexcept {
     if (n == 0) { return a; }
-    if (n < 32) { return {a.lo << n, (a.hi << n) | (a.lo >> (64 - n))}; }
-    return {0, a.lo << (n - 32)};
+    if (n < 64) { return {a.lo << n, (a.hi << n) | (a.lo >> (64 - n))}; }
+    if (n < 128) { return {0, a.lo << (n - 64)}; }
+    return {0, 0};
 }
 inline constexpr u128 u128_shr(u128 a, int n) noexcept {
     if (n == 0) { return a; }
-    if (n < 32) { return {(a.lo >> n) | (a.hi << (64 - n)), a.hi >> n}; }
-    return {a.hi >> (n - 32), 0};
+    if (n < 64) { return {(a.lo >> n) | (a.hi << (64 - n)), a.hi >> n}; }
+    if (n < 128) { return {a.hi >> (n - 64), 0}; }
+    return {0, 0};
 }
-inline constexpr u128 u128_not(u128 a) noexcept { return {!a.lo, !a.hi}; }
+inline constexpr u128 u128_not(u128 a) noexcept { return {~a.lo, ~a.hi}; }
 inline constexpr bool u128_gt(u128 a, u128 b) noexcept { return a.hi > b.hi || (a.hi == b.hi && a.lo > b.lo); }
 inline constexpr bool u128_ge(u128 a, u128 b) noexcept { return a.hi > b.hi || (a.hi == b.hi && a.lo >= b.lo); }
 inline constexpr std::uint64_t u128_to64(u128 a) noexcept { return a.lo; }
