@@ -7,9 +7,11 @@ The engine loads the official groupwise `.ninfer` artifact, serves OpenAI- and
 Anthropic-compatible APIs, and supports paged KV, compatible-prefix reuse, CUDA Graphs, MTP
 speculative decoding, reasoning-effort control, and ReplaySSM state transactions.
 
-This fork targets `sm_89` and Linux. Blackwell-only NVFP4/W4A4 execution is unavailable; the
-engine uses the same groupwise-int path as the 3090 base. The Windows path and the
-Qwen3.6-35B-A3B target are inherited but untested on the RTX 4090.
+This fork targets `sm_89` on Linux and native Windows (MSVC + CUDA, vcpkg-managed
+dependencies). Blackwell-only NVFP4/W4A4 execution is unavailable; the engine uses the same
+groupwise-int path as the 3090 base. The Windows path is built and validated on the RTX 4090
+(VS 2026 + CUDA 13.3, `CMAKE_CUDA_ARCHITECTURES=89`); the Qwen3.6-35B-A3B target is inherited
+but untested on the RTX 4090.
 
 ## Measured results on the RTX 4090
 

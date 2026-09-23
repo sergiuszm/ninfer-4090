@@ -6,6 +6,13 @@ add_executable(ninfer_public_api_test test_public_api.cpp)
 target_include_directories(ninfer_public_api_test PRIVATE ${PROJECT_SOURCE_DIR}/include)
 add_test(NAME ninfer_public_api_test COMMAND ninfer_public_api_test)
 
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+  add_executable(ninfer_portable_u128_test test_portable_u128.cpp)
+  target_include_directories(ninfer_portable_u128_test PRIVATE ${PROJECT_SOURCE_DIR}/src)
+  target_compile_definitions(ninfer_portable_u128_test PRIVATE NINFER_FORCE_PORTABLE_U128)
+  add_test(NAME ninfer_portable_u128_test COMMAND ninfer_portable_u128_test)
+endif()
+
 function(ninfer_add_test name)
   cmake_parse_arguments(arg "NEEDS_SOURCE_DIR" "" "SOURCES;LIBRARIES" ${ARGN})
   add_executable(${name} ${arg_SOURCES})

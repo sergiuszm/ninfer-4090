@@ -4,6 +4,7 @@
 #include "runtime/engine/context_portfolio_value.h"
 #include "runtime/engine/materialization_budget.h"
 #include "runtime/engine/resource_search.h"
+#include "runtime/portable_u128.h"
 
 #include <algorithm>
 #include <array>
@@ -947,9 +948,10 @@ private:
                            ? item.estimated_total_ns - parent.estimated_total_ns
                            : 0;
             };
-            const __uint128_t left  = static_cast<__uint128_t>(delta(cost)) * b;
-            const __uint128_t right = static_cast<__uint128_t>(delta(prior)) * a;
-            if (left != right) { return left < right; }
+            const auto left  = ninfer::detail::u128_mul64(delta(cost), b);
+            const auto right = ninfer::detail::u128_mul64(delta(prior), a);
+            if (ninfer::detail::u128_gt(left, right)) { return false; }
+            if (ninfer::detail::u128_gt(right, left)) { return true; }
         }
         return cost.key() < prior.key();
     }
