@@ -953,6 +953,12 @@ private:
         detail::PhysicalDelta resource_delta;
         detail::PhysicalDelta active_entitlement_delta;
         detail::PhysicalResources capacity_preparation_removed;
+        // Exclusive resources of the active sequence when the capture was reserved. Victims
+        // released before preparation can only transfer co-owned objects to it; that transfer is
+        // credited to the request entitlement at preparation (sergiuszm/ninfer-4090#9).
+        detail::PhysicalResources active_exclusive_baseline;
+        // Entitlement leaving with the dropped private checkpoints, re-derived at preparation.
+        detail::PhysicalResources private_replacement_owned;
         ContinuationSummary active_summary;
         std::vector<runtime::ContextTransferRequirement> transfer_requirements;
         std::vector<runtime::ContextTransferObservation> transfer_observations;
@@ -1196,6 +1202,17 @@ private:
                                                             StateImageHandle state) const noexcept;
     [[nodiscard]] bool state_exclusive_to_sequence(const SequenceState& sequence,
                                                    StateImageHandle state) const noexcept;
+    // Effect of the checkpoint references a private capture drops (replaced rewrite and/or the
+    // selected long anchor). `freed` is what the drop releases physically now, mirroring
+    // release_checkpoint_reference; `owned` is what leaves the sequence's exclusive entitlement.
+    // They differ when a dropped image is pinned, e.g. as the borrowed source of a pending Fork.
+    struct CapturePrivateDropEffect {
+        detail::PhysicalResources freed;
+        detail::PhysicalResources owned;
+    };
+    [[nodiscard]] CapturePrivateDropEffect
+    capture_private_drop_effect(const SequenceState& sequence, const CaptureGroup& group,
+                                const LongAnchorCheckpoint* selected_anchor_replacement) const;
     [[nodiscard]] bool compose_pressure_candidate(
         ResourceCandidateState& candidate,
         std::span<const ContinuationHandle* const> pressure_owners,
