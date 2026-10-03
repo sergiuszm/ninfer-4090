@@ -251,6 +251,69 @@ tokens) returned 200 with the correct count; one 3200x3200 image (10,000 tokens)
 remaining wall is the 32768 aggregate, about 39 such screenshots or 8 images at pi's
 2000x2000 resize cap in one conversation.
 
+## Community triage 2026-10-04 (issue #12, PRs #10, #13, #14, #15)
+
+One new issue and three new PRs arrived after 2026-09-22, and PR #10 had an unreviewed update.
+All five items were answered on 2026-10-04 against tip `aeeba414`. A magnus GPU window ran the
+gates for #13 and #15. Reviews, gate scripts and evidence are in
+`ninfer-recon-notes/triage-20261004/`.
+
+| Item | Verdict | Notes |
+|---|---|---|
+| PR #10 native Windows (MSVC) build | MERGED (`cb2df08a`..`b8c71f00`, rebase) | The `u128` shim is correct now. A differential test against native `unsigned __int128` (68M checks, UBSan on, all shift amounts 0..127) found 0 mismatches. The Linux path still selects the native type. Open P4 items: `make_prefill_work(0, UINT64_MAX)` wraps to 0 instead of saturating (also on Linux, unreachable with real token counts), a raw `__int128` in the context-cost bench fixture, and README wording |
+| PR #13 capture-path entitlement credit | MERGED (`49deb207`, rebase) | Fixes a real engine latch, see below. Open gap: at `--max-concurrency 2` a shared prefix that ANOTHER lane releases is still not credited (the baseline is taken per capture transaction) |
+| PR #15 INT8 group-64 activation prefill (port of soohl `19aa1337`) | CHANGES REQUESTED | Gate on the 4090, see below. P1: the tree does not build with tests and benchmarks on (soohl's `KvCacheStorage::E8Group64` in two tests, the Q5 bench update not taken). A gate-only build fix is in `pr15-gate-build-fixes.patch` |
+| PR #14 `--tolerant-tool-calls` (re-implementation of gzenz `3c0b4dc5`) | CHANGES REQUESTED | Strict mode is byte-identical with the flag off. With the flag on, three adversarial cases make the parser emit a call that the model only quoted (for example `run_shell {"command":"rm -rf build"}` from a quoted example) |
+| Issue #12 MTP-compatible structured output (UDP #12, XGrammar) | OPEN, after catch-up #4 | The MTP design of UDP #12 is correct (mask on the first target token, sequential draft validation, longest valid prefix). It patches files that no longer exist here, fetches XGrammar with git at configure time (fails in our image: CMake 3.28, no git), forces JSON inside an open `<think>` block, and lets special tokens be sampled inside JSON strings. Upstream has no constrained decoding yet (Neroued/ninfer#33) |
+
+### PR #13 gate (magnus, base `aeeba414` against the PR, fresh server per run)
+
+The driver is a Claude-Code-shaped Anthropic replay: `cache_control` on the system prompt and on
+the last two user messages, microcompaction, edits two messages back, title calls. With the
+default two-lane catalog (`--max-concurrency 2 --auto-long-anchors 2`, 4 private, 4 shared), the
+base binary latched in 2 of 2 runs. Two requests failed with `capture transaction is not
+reservable` (`program_impl.h:7850`), and `/health` stayed 503 until restart. The PR passed 40/40
+in both runs, with 32 to 33 non-root reuses. The reporter geometries (one lane, anchors 2,
+private continuations 8 and 2) and the production geometry (2/1/2 with vision and the 4090 cost
+preset) passed on both binaries. Production never hit the latch because `--max-shared-prefixes 1`
+keeps the shared catalog small. The issue #9 fast geometries passed 18/18, 18/18 and 19/19 on
+the PR, and the `context_store` and `prefix_real` GPU tests passed. The merged tip `49deb207`
+builds, and the planner, context-cost, materialization-budget and `u128` tests pass. The merge is
+NOT deployed: production stays `visbudget-328d9aa8`.
+
+### PR #15 gate (magnus, 400 W limit, production flags plus `--no-prefix-reuse`)
+
+| Prompt | base A16 | PR INT8 | PR with `NINFER_A16_PREFILL=1` |
+|---|---|---|---|
+| ~6K | 2115 tok/s | 3622 (+71%) | 2089 (-1.2%) |
+| ~25K | 2021 | 3389 (+68%) | 2006 (-0.7%) |
+| ~50K | 1875 | 3012 (+61%) | 1866 (-0.5%) |
+| ~128K | 1529 | 2221 (+45%) | 1525 (-0.3%) |
+
+- Op tests 8/8 pass on sm_89. The real-model `prefix_real` scenarios (default, `e8-host-replay`,
+  `automatic-private-anchors`) pass with INT8 prefill.
+- Perplexity, quick set (4 of 16 streams, about 256K tokens, INT8 KV): +0.039% overall, worst
+  domain `english_long_form` +0.082%.
+- With `NINFER_A16_PREFILL=1` the greedy decode text is identical to base on both probes. Boot
+  geometry, KV headroom and VRAM after a 128K prefill are identical for all three binaries.
+- The PR replaces the constexpr cooperative residency of the GDN gating kernels with an uncached
+  runtime occupancy query. This change is outside the stated scope and also affects the A16 path.
+  The gating kernels are 8 to 9.5% slower than base, which is the 1% A16 prefill loss in the
+  table. It relates to the Don-Chad `7afc8e17` note above.
+- After an INT8 prefill, MTP acceptance on a greedy prose probe fell from 0.483 to 0.422 (decode
+  -7.6%). The code probe did not change (0.808 against 0.810). Before INT8 becomes the default,
+  run the temp-0 tool-call A/B, including MTP acceptance, and one vision probe.
+
+### Other findings from this triage
+
+- Claude Code 2.1.x always sends `thinking.display: "omitted"`. The Anthropic surface rejects it
+  with a 400 (`requires encrypted hidden-reasoning restore semantics`, upstream `65f620a7`, still
+  on `neroued/master`). Claude Code therefore works only with `MAX_THINKING_TOKENS=0`. Candidate
+  upstream issue.
+- The strict tool-call parser scans quadratically: a 1 MB pathological output takes 9.9 s and
+  128 KB takes 158 ms. Real outputs do not reach this.
+- Upstream is 83 commits past our merge base `d4929686` (41 at the 2026-09-22 handoff).
+
 ## Community triage 2026-09-22 (issues and PRs opened on this fork)
 
 Six issues and four PRs had accumulated since 2026-08-30 without a reply; the fork was not
