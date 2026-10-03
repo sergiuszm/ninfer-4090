@@ -220,6 +220,14 @@ String parameters preserve function/tool-call markers and balanced nested
 so an unmatched nested parameter opener or a standalone `</parameter>` cannot be represented
 unambiguously; either causes the complete tool-call region to fall back to ordinary content.
 
+`--tolerant-tool-calls` keeps the strict parse and its result unchanged, and only acts when that
+parse fails. It then accepts a later `</parameter>` as a value's end when the next token is another
+`<parameter=NAME>` or `</function>` (so a value may quote unmatched markers), skips a `<tool_call>`
+quoted in prose before the real calls, and keeps prose after complete calls as content instead of
+discarding the calls. The first candidate split whose function reaches `</function>` and
+`</tool_call>` wins, with backtracking bounded per function. Output that still cannot be
+recovered falls back to ordinary content exactly as in strict mode.
+
 Message roles retain their input order through schema translation. The Qwen family frontend maps
 both `system` and `developer` to system-class ChatML blocks at their original positions; it does not
 move later instructions to the beginning of the conversation. A leading instruction keeps the
@@ -846,6 +854,7 @@ The table lists executable defaults. The startup example selects a long-context 
 | `--auto-long-anchors N` | propose a private long anchor at each of the last N message boundaries of every prompt; clamped to the anchor limit, `0` disables | anchor limit |
 | `--no-thinking` | disable thinking by default | thinking on |
 | `--preserve-thinking` | preserve closed-turn assistant reasoning by default | off |
+| `--tolerant-tool-calls` | recover complete Qwen tool calls the strict parser returns as text | off |
 | `--cors` | permissive browser CORS headers | off |
 | `--temperature F` | process-level temperature override | unset |
 | `--top-p F` | process-level top-p override | unset |
@@ -919,7 +928,8 @@ the template has no tiered default. A preparation rejection always leaves the re
 call count, empty non-string arguments omitted during normalization, schema-mismatched arguments
 preserved for consumer validation, and a stable text-fallback reason. Fallback reasons are `none`,
 `malformed_structure`, `duplicate_parameter`, `invalid_tool_name`, `undeclared_tool`, and
-`trailing_content`. These counters contain no tool arguments or generated text.
+`trailing_content`. `recovered_from` names the strict fallback reason that `--tolerant-tool-calls`
+overcame, or `none`. These counters contain no tool arguments or generated text.
 
 `request_done.timings_seconds` contains `prepare`, `ttft`, `vision`, `prefill`, `decode`, and `total`
 as full-precision JSON numbers. Its `speculative` object contains `backend`, `draft_window`, `rounds`,

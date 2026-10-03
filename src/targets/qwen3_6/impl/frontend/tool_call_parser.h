@@ -62,9 +62,14 @@ struct ParsedToolCallOutput {
 [[nodiscard]] std::shared_ptr<const ToolCallOutputContract>
 build_tool_call_output_contract(std::span<const std::string> tool_jsons, bool enabled);
 
+// Strict mode returns any structure/identity failure as text. Tolerant mode first runs the strict
+// parse unchanged; only if it fails does it retry: a parameter value may end at a later
+// `</parameter>` that is followed by structure (values that quote tool markup), a `<tool_call>`
+// quoted in prose before the real calls is skipped, and prose after complete calls is kept as
+// content instead of discarding the calls.
 [[nodiscard]] ParsedToolCallOutput
 parse_qwen_tool_call_output(const std::string& text, std::size_t max_tool_name_length,
-                            const ToolCallOutputContract& contract);
+                            const ToolCallOutputContract& contract, bool tolerant = false);
 
 // Incrementally publishes bytes that are provably outside a possible terminal Qwen tool-call
 // suffix. At terminal time, valid calls are retained structurally; malformed output is restored
@@ -78,7 +83,7 @@ public:
     };
 
     ToolCallOutputDecoder(std::shared_ptr<const ToolCallOutputContract> contract,
-                          std::size_t max_tool_name_length);
+                          std::size_t max_tool_name_length, bool tolerant = false);
 
     [[nodiscard]] std::string feed(std::string_view text);
     [[nodiscard]] Terminal finish();
@@ -91,6 +96,7 @@ private:
     std::size_t max_tool_name_length_ = 0;
     bool saw_tool_marker_             = false;
     bool finished_                    = false;
+    bool tolerant_                    = false;
 };
 
 } // namespace ninfer::targets::qwen3_6::frontend_internal

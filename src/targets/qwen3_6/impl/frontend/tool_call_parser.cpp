@@ -410,10 +410,13 @@ NormalizedParameter normalize_parameter(std::string_view encoded_value,
 class QwenToolRegionParser {
 public:
     QwenToolRegionParser(std::string_view text, std::size_t max_name_length,
-                         const Contract& contract)
-        : text_(text), max_name_length_(max_name_length), contract_(contract) {}
+                         const Contract& contract, bool tolerant = false)
+        : text_(text), max_name_length_(max_name_length), contract_(contract), tolerant_(tolerant) {
+    }
 
-    FallbackReason parse(std::vector<RawToolCall>& calls) const {
+    // `trailing_begin` is set (tolerant mode only) when complete calls are followed by prose.
+    FallbackReason parse(std::vector<RawToolCall>& calls,
+                         std::size_t* trailing_begin = nullptr) const {
         std::size_t pos = 0;
         for (;;) {
             skip_format_whitespace(text_, pos);
@@ -421,6 +424,10 @@ public:
                 return calls.empty() ? FallbackReason::MalformedStructure : FallbackReason::None;
             }
             if (!starts_with_at(text_, pos, kToolOpen)) {
+                if (tolerant_ && !calls.empty() && trailing_begin != nullptr) {
+                    *trailing_begin = pos;
+                    return FallbackReason::None;
+                }
                 return calls.empty() ? FallbackReason::MalformedStructure
                                      : FallbackReason::TrailingContent;
             }
@@ -465,6 +472,10 @@ private:
         }
         pos = name_end + 1;
 
+        if (tolerant_) {
+            std::size_t budget = kMaxParameterAttempts;
+            return parse_parameters_tolerant(pos, call, budget);
+        }
         for (;;) {
             skip_format_whitespace(text_, pos);
             if (consume(pos, kFunctionClose)) { return FallbackReason::None; }
@@ -495,6 +506,83 @@ private:
             .name = name, .value = text_.substr(value_begin, value_end - value_begin)});
         pos = value_end + kParamClose.size();
         return FallbackReason::None;
+    }
+
+    // Bounds the backtracking below; real calls carry a handful of parameters.
+    static constexpr std::size_t kMaxParameterAttempts = 64;
+
+    // `pos` is a parameter-name open position; true when a valid `<parameter=NAME>` starts there.
+    bool parameter_open_at(std::size_t pos) const {
+        if (!starts_with_at(text_, pos, kParamOpen)) { return false; }
+        const std::size_t name_begin = pos + kParamOpen.size();
+        const std::size_t name_end   = text_.find('>', name_begin);
+        return name_end != std::string_view::npos && name_end != name_begin;
+    }
+
+    // A `</parameter>` is a structural close candidate when the next token is another parameter or
+    // the function close.
+    bool followed_by_structure(std::size_t pos) const {
+        skip_format_whitespace(text_, pos);
+        return starts_with_at(text_, pos, kFunctionClose) || parameter_open_at(pos);
+    }
+
+    // Tolerant parameter list: try the balanced close first (the strict parse's choice), then each
+    // later structural close in order, and keep the first split whose remainder reaches
+    // `</function>` followed by `</tool_call>`. Returns the first (balanced) attempt's failure.
+    FallbackReason parse_parameters_tolerant(std::size_t& pos, RawToolCall& call,
+                                             std::size_t& budget) const {
+        std::size_t at = pos;
+        skip_format_whitespace(text_, at);
+        if (starts_with_at(text_, at, kFunctionClose)) {
+            std::size_t after = at + kFunctionClose.size();
+            skip_format_whitespace(text_, after);
+            if (!starts_with_at(text_, after, kToolClose)) {
+                return FallbackReason::MalformedStructure;
+            }
+            pos = at + kFunctionClose.size();
+            return FallbackReason::None;
+        }
+        if (!consume(at, kParamOpen)) { return FallbackReason::MalformedStructure; }
+        const std::size_t name_begin = at;
+        const std::size_t name_end   = text_.find('>', name_begin);
+        if (name_end == std::string_view::npos || name_end == name_begin) {
+            return FallbackReason::MalformedStructure;
+        }
+        const std::string_view name = text_.substr(name_begin, name_end - name_begin);
+        if (std::any_of(call.parameters.begin(), call.parameters.end(),
+                        [&](const RawParameter& existing) { return existing.name == name; })) {
+            return FallbackReason::DuplicateParameter;
+        }
+
+        const std::size_t value_begin = name_end + 1;
+        std::vector<std::size_t> candidates;
+        std::size_t balanced    = 0;
+        const bool has_balanced = find_parameter_close(value_begin, balanced);
+        if (has_balanced) { candidates.push_back(balanced); }
+        for (std::size_t close                      = text_.find(kParamClose, value_begin);
+             close != std::string_view::npos; close = text_.find(kParamClose, close + 1)) {
+            if ((!has_balanced || close != balanced) &&
+                followed_by_structure(close + kParamClose.size())) {
+                candidates.push_back(close);
+            }
+        }
+
+        FallbackReason first_failure = FallbackReason::MalformedStructure;
+        for (std::size_t index = 0; index < candidates.size() && budget > 0; ++index) {
+            --budget;
+            const std::size_t close = candidates[index];
+            call.parameters.push_back(RawParameter{
+                .name = name, .value = text_.substr(value_begin, close - value_begin)});
+            std::size_t next             = close + kParamClose.size();
+            const FallbackReason failure = parse_parameters_tolerant(next, call, budget);
+            if (failure == FallbackReason::None) {
+                pos = next;
+                return FallbackReason::None;
+            }
+            call.parameters.pop_back();
+            if (index == 0) { first_failure = failure; }
+        }
+        return first_failure;
     }
 
     bool find_parameter_open_before(std::size_t scan, std::size_t limit,
@@ -538,6 +626,7 @@ private:
     std::string_view text_;
     std::size_t max_name_length_;
     const Contract& contract_;
+    bool tolerant_ = false;
 };
 
 GeneratedToolCall normalize_raw_tool_call(const RawToolCall& raw, const Contract& contract,
@@ -597,7 +686,8 @@ build_tool_call_output_contract(std::span<const std::string> tool_jsons, bool en
 
 ParsedToolCallOutput parse_qwen_tool_call_output(const std::string& text,
                                                  std::size_t max_tool_name_length,
-                                                 const ToolCallOutputContract& contract) {
+                                                 const ToolCallOutputContract& contract,
+                                                 bool tolerant) {
     const std::size_t first = text.find(kToolOpen);
     if (first == std::string::npos) { return fallback(text); }
 
@@ -611,7 +701,35 @@ ParsedToolCallOutput parse_qwen_tool_call_output(const std::string& text,
     const FallbackReason failure = parser.parse(raw_calls);
     if (failure != FallbackReason::None) {
         out.diagnostics.fallback_reason = failure;
-        return fallback(text, out.diagnostics);
+        if (!tolerant) { return fallback(text, out.diagnostics); }
+
+        // Tolerant retry from each `<tool_call>` in order: the first start whose region parses
+        // wins, text before it is content, prose after the calls is appended to content.
+        for (std::size_t start = first; start != std::string::npos;
+             start             = text.find(kToolOpen, start + 1)) {
+            std::vector<RawToolCall> recovered;
+            std::size_t trailing_begin    = std::string_view::npos;
+            const std::string_view region = std::string_view(text).substr(start);
+            const QwenToolRegionParser tolerant_parser(region, max_tool_name_length, contract,
+                                                       true);
+            if (tolerant_parser.parse(recovered, &trailing_begin) != FallbackReason::None) {
+                continue;
+            }
+            raw_calls   = std::move(recovered);
+            out.content = rtrim_format_whitespace(std::string_view(text).substr(0, start));
+            if (trailing_begin != std::string_view::npos) {
+                const std::string_view trailing =
+                    trim_format_whitespace(region.substr(trailing_begin));
+                if (!out.content.empty() && !trailing.empty()) { out.content.append("\n\n"); }
+                out.content.append(trailing);
+            }
+            out.diagnostics.recovered_from  = failure;
+            out.diagnostics.fallback_reason = FallbackReason::None;
+            break;
+        }
+        if (out.diagnostics.fallback_reason != FallbackReason::None) {
+            return fallback(text, out.diagnostics);
+        }
     }
 
     out.tool_calls.reserve(raw_calls.size());
@@ -625,8 +743,9 @@ ParsedToolCallOutput parse_qwen_tool_call_output(const std::string& text,
 }
 
 ToolCallOutputDecoder::ToolCallOutputDecoder(std::shared_ptr<const ToolCallOutputContract> contract,
-                                             std::size_t max_tool_name_length)
-    : contract_(std::move(contract)), max_tool_name_length_(max_tool_name_length) {}
+                                             std::size_t max_tool_name_length, bool tolerant)
+    : contract_(std::move(contract)), max_tool_name_length_(max_tool_name_length),
+      tolerant_(tolerant) {}
 
 std::string ToolCallOutputDecoder::feed(std::string_view text) {
     if (finished_) { throw std::logic_error("tool-call output decoder is already finished"); }
@@ -679,12 +798,14 @@ ToolCallOutputDecoder::Terminal ToolCallOutputDecoder::finish() {
     if (!contract_) { return {}; }
 
     ParsedToolCallOutput parsed =
-        parse_qwen_tool_call_output(tool_region_, max_tool_name_length_, *contract_);
+        parse_qwen_tool_call_output(tool_region_, max_tool_name_length_, *contract_, tolerant_);
     if (saw_tool_marker_ && parsed.is_tool_call_response) {
         trailing_whitespace_.clear();
         tool_region_.clear();
         marker_prefix_bytes_ = 0;
-        return Terminal{.content     = {},
+        // Strict mode: the region starts at the first marker, so this content is empty. Tolerant
+        // mode: text the recovery moved out of the call region (a quoted marker, trailing prose).
+        return Terminal{.content     = std::move(parsed.content),
                         .tool_calls  = std::move(parsed.tool_calls),
                         .diagnostics = parsed.diagnostics};
     }

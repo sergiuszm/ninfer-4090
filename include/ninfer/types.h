@@ -299,6 +299,8 @@ struct OutputOptions {
     // Presentation constraint supplied by the protocol adapter. It bounds only Qwen's emitted
     // function-name grammar; it does not require the name to match a currently declared tool.
     std::uint32_t tool_name_max_length = 128;
+    // Recover complete tool calls from output the strict Qwen parser would return as text.
+    bool tolerant_tool_calls = false;
 };
 
 struct RequestOptions {
@@ -374,6 +376,9 @@ struct ToolCallParseDiagnostics {
     std::uint32_t empty_arguments_omitted       = 0;
     std::uint32_t schema_mismatch_arguments     = 0;
     ToolCallParseFallbackReason fallback_reason = ToolCallParseFallbackReason::None;
+    // Tolerant mode only: the strict-parse failure that recovery overcame (None if the strict
+    // parse succeeded or recovery did not run).
+    ToolCallParseFallbackReason recovered_from = ToolCallParseFallbackReason::None;
 
     [[nodiscard]] friend constexpr bool
     operator==(const ToolCallParseDiagnostics&, const ToolCallParseDiagnostics&) noexcept = default;

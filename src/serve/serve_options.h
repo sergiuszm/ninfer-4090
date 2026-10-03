@@ -65,6 +65,8 @@ struct ServeOptions {
     bool enable_thinking =
         true; // default thinking mode for the generation prompt (--no-thinking opts out)
     bool preserve_thinking = false;
+    // Recover complete Qwen tool calls from output the strict parser returns as text.
+    bool tolerant_tool_calls = false;
     std::optional<std::uint32_t> default_thinking_budget;
     int default_max_tokens = kDefaultMaxTokens;
     bool enable_cors       = false; // send permissive CORS headers for browser UIs

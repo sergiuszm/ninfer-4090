@@ -735,6 +735,122 @@ int test_incremental_embedded_parameter_markup() {
 
 } // namespace
 
+std::string first_argument(const fi::ParsedToolCallOutput& parsed, const std::string& key) {
+    if (parsed.tool_calls.size() != 1) { return "<no single call>"; }
+    const Json args = Json::parse(parsed.tool_calls.front().arguments_json);
+    return args.contains(key) ? args.at(key).get<std::string>() : "<missing>";
+}
+
+int test_tolerant_recovers_unrepresentable_delimiters() {
+    const auto contract = contract_for("bash", Json{{"command", Json{{"type", "string"}}}});
+    const std::string unmatched_open =
+        tool_call("bash", {{"command", "echo '<parameter=unterminated>'"}});
+    const std::string standalone_close = tool_call("bash", {{"command", "echo '</parameter>'"}});
+
+    int failures = 0;
+    for (const auto& [text, value] :
+         {std::pair{unmatched_open, std::string("echo '<parameter=unterminated>'")},
+          std::pair{standalone_close, std::string("echo '</parameter>'")}}) {
+        const auto strict = fi::parse_qwen_tool_call_output(text, 64, contract);
+        failures += check(!strict.is_tool_call_response, "strict mode changed: " + value);
+        const auto parsed = fi::parse_qwen_tool_call_output(text, 64, contract, true);
+        failures += check(parsed.is_tool_call_response, "tolerant mode did not recover: " + value);
+        failures += check(first_argument(parsed, "command") == value,
+                          "tolerant mode recovered the wrong value: " + value);
+        failures += check(parsed.diagnostics.recovered_from ==
+                              ninfer::ToolCallParseFallbackReason::MalformedStructure,
+                          "recovery was not recorded: " + value);
+        failures += check(parsed.content.empty(), "recovery leaked content: " + value);
+    }
+    return failures;
+}
+
+int test_tolerant_multi_parameter_value_quoting_close() {
+    const auto contract =
+        contract_for("write_file", Json{{"path", Json{{"type", "string"}}},
+                                        {"content", Json{{"type", "string"}}},
+                                        {"overwrite", Json{{"type", "boolean"}}}});
+    const std::string body = "assert parse('</parameter>') is None\n";
+    const std::string text =
+        tool_call("write_file", {{"path", "tests/t.py"}, {"content", body}, {"overwrite", "true"}});
+    const auto parsed = fi::parse_qwen_tool_call_output(text, 64, contract, true);
+
+    int failures = 0;
+    failures += check(parsed.is_tool_call_response, "multi-parameter call was not recovered");
+    if (parsed.tool_calls.size() != 1) { return failures; }
+    const Json args = Json::parse(parsed.tool_calls.front().arguments_json);
+    failures += check(args.at("path") == "tests/t.py", "path was mis-split");
+    failures +=
+        check(args.at("content").get<std::string>().find("'</parameter>'") != std::string::npos,
+              "content lost the quoted close");
+    failures += check(args.at("overwrite") == true, "boolean after recovered value was mistyped");
+    return failures;
+}
+
+int test_tolerant_prose_around_calls() {
+    const auto contract        = contract_for("bash", Json{{"command", Json{{"type", "string"}}}});
+    const std::string call     = tool_call("bash", {{"command", "ls"}});
+    const std::string quoted   = "Qwen wraps calls in <tool_call> tags. Running it now.\n" + call;
+    const std::string trailing = call + "\nDone, that lists the directory.";
+
+    int failures             = 0;
+    const auto strict_quoted = fi::parse_qwen_tool_call_output(quoted, 64, contract);
+    failures +=
+        check(!strict_quoted.is_tool_call_response, "strict mode changed for quoted marker");
+    const auto q = fi::parse_qwen_tool_call_output(quoted, 64, contract, true);
+    failures += check(q.is_tool_call_response && first_argument(q, "command") == "ls",
+                      "call after a quoted marker was not recovered");
+    failures += check(q.content == "Qwen wraps calls in <tool_call> tags. Running it now.",
+                      "prose before the call was not kept as content: " + q.content);
+
+    const auto strict_trailing = fi::parse_qwen_tool_call_output(trailing, 64, contract);
+    failures += check(strict_trailing.diagnostics.fallback_reason ==
+                          ninfer::ToolCallParseFallbackReason::TrailingContent,
+                      "strict mode changed for trailing prose");
+    const auto t = fi::parse_qwen_tool_call_output(trailing, 64, contract, true);
+    failures += check(t.is_tool_call_response && first_argument(t, "command") == "ls",
+                      "call before trailing prose was not recovered");
+    failures += check(t.content == "Done, that lists the directory.",
+                      "trailing prose was not kept as content: " + t.content);
+    failures +=
+        check(t.diagnostics.recovered_from == ninfer::ToolCallParseFallbackReason::TrailingContent,
+              "trailing recovery was not recorded");
+    return failures;
+}
+
+int test_tolerant_keeps_unrecoverable_fallback() {
+    const auto contract         = contract_for("bash", Json{{"command", Json{{"type", "string"}}}});
+    const std::string truncated = "<tool_call>\n<function=bash>\n<parameter=command>\nls -la";
+    const auto parsed           = fi::parse_qwen_tool_call_output(truncated, 64, contract, true);
+    int failures                = 0;
+    failures += check(!parsed.is_tool_call_response, "a truncated call was invented");
+    failures += check(parsed.content == truncated, "fallback did not preserve the bytes");
+    return failures;
+}
+
+int test_tolerant_incremental_decoder() {
+    const auto contract = output_contract_for("bash", Json{{"command", Json{{"type", "string"}}}});
+    const std::string text = "Note: <tool_call> is the marker.\n" +
+                             tool_call("bash", {{"command", "echo '</parameter>'"}}) +
+                             "\nThat is all.";
+    fi::ToolCallOutputDecoder decoder(contract, 64, true);
+    std::string visible;
+    for (std::size_t i = 0; i < text.size(); i += 7) { visible += decoder.feed(text.substr(i, 7)); }
+    const auto terminal = decoder.finish();
+
+    int failures = 0;
+    failures += check(terminal.tool_calls.size() == 1, "decoder did not recover the call");
+    if (terminal.tool_calls.size() == 1) {
+        const Json args = Json::parse(terminal.tool_calls.front().arguments_json);
+        failures +=
+            check(args.at("command") == "echo '</parameter>'", "decoder value was mis-split");
+    }
+    failures +=
+        check(visible + terminal.content == "Note: <tool_call> is the marker.\n\nThat is all.",
+              "decoder content was wrong: " + visible + "|" + terminal.content);
+    return failures;
+}
+
 int main() {
     int failures = 0;
     failures += test_basic_legacy_parsing();
@@ -756,6 +872,11 @@ int main() {
     failures += test_incremental_valid_and_boolean();
     failures += test_incremental_fallback_preserves_bytes();
     failures += test_incremental_embedded_parameter_markup();
+    failures += test_tolerant_recovers_unrepresentable_delimiters();
+    failures += test_tolerant_multi_parameter_value_quoting_close();
+    failures += test_tolerant_prose_around_calls();
+    failures += test_tolerant_keeps_unrecoverable_fallback();
+    failures += test_tolerant_incremental_decoder();
     if (failures == 0) { std::cout << "ok\n"; }
     return failures == 0 ? 0 : 1;
 }
