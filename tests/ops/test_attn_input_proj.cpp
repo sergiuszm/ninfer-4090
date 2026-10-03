@@ -60,15 +60,21 @@ int run_target_projection_case(DevicePackedWeight& parent, DevicePackedWeight* g
         value(kvrows, tokens);
     Tensor x(input.p, DType::BF16, {hidden, tokens}), q = query.tensor(), g = gate.tensor(),
                                                       k = key.tensor(), v = value.tensor();
+    const bool dual_a8 = dual && policy == ops::LinearPolicy::AllowA8;
     const auto capacity =
-        dual ? 0
+        dual ? (dual_a8
+                    ? ops::attn_input_proj_workspace_capacity_bytes(hidden, policy, tokens, tokens)
+                    : 0)
              : ops::attn_input_proj_workspace_capacity_bytes(QType::FP8_E4M3FN_ROW_BF16S, 14336,
                                                              hidden, policy, tokens, tokens);
     GuardedDeviceBuffer scratch(std::max<std::size_t>(capacity, 1));
     DeviceArena workspace(DeviceSpan{scratch.data(), std::max<std::size_t>(capacity, 1)});
     DeviceContext device;
     const auto launch = [&] {
-        if (dual)
+        if (dual_a8)
+            ops::attn_input_proj(x, parent.view(), gate_value->view(), q, g, k, v, policy,
+                                 workspace, device.stream);
+        else if (dual)
             ops::attn_input_proj(x, parent.view(), gate_value->view(), q, g, k, v, device.stream);
         else if (policy == ops::LinearPolicy::A16Only && (tokens % 2))
             ops::attn_input_proj(x, parent.view(), q, g, k, v, device.stream);
@@ -100,9 +106,9 @@ int run_target_projection_case(DevicePackedWeight& parent, DevicePackedWeight* g
             launch();
         cuda_synchronize(device.stream);
         const bool a8            = policy == ops::LinearPolicy::AllowA8;
-        const auto criterion     = dual ? kAttnInputProjA16Tolerance
-                                   : a8 ? kAttnInputProjA8Tolerance
-                                        : kFp8AttnInputProjA16Tolerance;
+        const auto criterion     = a8     ? kAttnInputProjA8Tolerance
+                                   : dual ? kAttnInputProjA16Tolerance
+                                          : kFp8AttnInputProjA16Tolerance;
         const int sample_count   = (a8 || replay) ? 31 : 7;
         const std::string suffix = std::string(dual ? " Q4/Q5" : " FP8") +
                                    (a8 ? " allow-a8" : " a16") + " T=" + std::to_string(tokens) +
@@ -129,6 +135,48 @@ int run_target_projection_case(DevicePackedWeight& parent, DevicePackedWeight* g
     return failures;
 }
 
+int verify_call_invariance(DevicePackedWeight& query_key, DevicePackedWeight& gate_value) {
+    constexpr std::int32_t kHidden = 5120;
+    constexpr std::int32_t kQRows = 6144, kKvRows = 1024;
+    constexpr std::int32_t kWide = 260, kNarrow = 128;
+    const std::vector<float> activation   = make_bf16_activation(kHidden, kWide, 7U);
+    const std::vector<std::uint16_t> bits = bf16_bits(activation);
+    DeviceBuffer dev                      = to_device(bits);
+    std::vector<std::vector<std::uint16_t>> captured;
+    // Arm A: tokens 4..131 sitting at columns 4..131 of a 260-wide call.
+    // Arm B: the same tokens re-indexed to columns 0..127 of a 128-wide call,
+    // exactly as prefix reuse re-indexes the first uncached token to column 0.
+    constexpr std::int32_t kShift = 4;
+    std::vector<std::uint16_t> shifted(bits.begin() + static_cast<std::ptrdiff_t>(kShift) * kHidden,
+                                       bits.end());
+    DeviceBuffer dev_shifted = to_device(shifted);
+    for (int arm = 0; arm < 2; ++arm) {
+        const std::int32_t T = arm == 0 ? kWide : kNarrow;
+        GuardedBf16Tensor query(kQRows, T), gate(kQRows, T), key(kKvRows, T), value(kKvRows, T);
+        Tensor x(arm == 0 ? dev.p : dev_shifted.p, DType::BF16, {kHidden, T});
+        Tensor q = query.tensor(), g = gate.tensor(), k = key.tensor(), v = value.tensor();
+        const std::size_t bytes = ops::attn_input_proj_workspace_capacity_bytes(
+            kHidden, ops::LinearPolicy::AllowA8, T, T);
+        WorkspaceArena ws(std::max<std::size_t>(bytes, 256));
+        ops::attn_input_proj(x, query_key.view(), gate_value.view(), q, g, k, v,
+                             ops::LinearPolicy::AllowA8, ws, nullptr);
+        cuda_synchronize();
+        captured.push_back(query.bits());
+    }
+    std::size_t diff    = 0;
+    const std::size_t n = static_cast<std::size_t>(kQRows) * kNarrow;
+    for (std::size_t i = 0; i < n; ++i) {
+        const std::size_t a = static_cast<std::size_t>(kQRows) * kShift + i;
+        if (captured[0][a] != captured[1][i]) { ++diff; }
+    }
+    if (diff != 0) {
+        std::cerr << "attn Q4/Q5 A8: " << diff << " of " << n
+                  << " outputs changed when the same tokens were re-indexed\n";
+        return 1;
+    }
+    return 0;
+}
+
 int run_q4_q5() {
     constexpr std::int32_t kHidden = 5120;
     constexpr std::int32_t kParent = 7168;
@@ -147,6 +195,13 @@ int run_q4_q5() {
     for (int t : {1, 8, 12, 13, 16, 32, 63, 64, 65, 96, 104, 105, 127, 128, 129, 192, 193})
         failures +=
             run_target_projection_case(query_key, &gate_value, t, ops::LinearPolicy::A16Only, true);
+    // Q4/Q5 INT8 (A8) prefill: every token width uses the same group-64 activation profile.
+    for (int t : {1, 16, 17, 21, 48, 64, 128, 257, 1024, 4097})
+        failures +=
+            run_target_projection_case(query_key, &gate_value, t, ops::LinearPolicy::AllowA8);
+    for (int t : {1, 64, 257})
+        failures +=
+            run_target_projection_case(query_key, &gate_value, t, ops::LinearPolicy::AllowA8, true);
     return failures;
 }
 

@@ -16,6 +16,7 @@ int w8_a16_conformance() {
     constexpr std::array<std::int32_t, 5> kK4096RouteInteriors{1, 24, 96, 256, 1024};
     failures += ninfer::test::linear_add::run_shape(
         "W8_A16 LinearAdd", WeightFormat::W8G32F16S,
+        ninfer::test::linear_add::ActivationCompute::A16,
         ShapeCase{2048, 4096, 419U, kK4096RouteStarts, kK4096RouteInteriors});
 
     constexpr std::array<std::int32_t, 32> kK6144RouteStarts{
@@ -30,6 +31,7 @@ int w8_a16_conformance() {
     };
     failures += ninfer::test::linear_add::run_shape(
         "W8_A16 LinearAdd", WeightFormat::W8G32F16S,
+        ninfer::test::linear_add::ActivationCompute::A16,
         ShapeCase{2048, 6144, 421U, kK6144RouteStarts, kK6144RouteInteriors});
     return failures;
 }

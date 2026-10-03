@@ -30,15 +30,28 @@ namespace ninfer::ops {
  *   The oracle exact-decodes both weight parents and evaluates all four logical projections
  *   naively in FP64 from the represented input. The BF16 qkv and z outputs are promoted and
  *   compared directly with those ideal values; final output storage rounding belongs to
- *   GdnInputProj's named A16 criterion, not the oracle. Production routes may choose their
- *   private precision independently; every registered route writes both final allocations.
+ *   GdnInputProj's selected A16 or A8 criterion, not the oracle. A16Only uses the existing
+ *   BF16 activation routes. AllowA8 uses private symmetric group-64 INT8 activation
+ *   quantization and INT8 contraction at every positive T, with FP32 cross-group accumulation.
+ *   Every registered route writes both final allocations.
  *
  * Effects:
  *   Writes the full qkv and z outputs; inputs and outputs must not alias.
  *
  * Workspace:
- *   No transient bytes are required.
+ *   Caller-owned call-scoped storage is sized by the capacity query for input_rows=5120
+ *   and the inclusive token interval. Live workspace must not overlap inputs, weights, or
+ *   outputs. A16Only requires zero bytes; AllowA8 stages quantized activations in bounded
+ *   token tiles. The convenience overload selects A16Only without transient storage.
  */
+[[nodiscard]] std::size_t gdn_input_proj_workspace_capacity_bytes(std::int32_t input_rows,
+                                                                  LinearPolicy policy,
+                                                                  std::int32_t min_tokens,
+                                                                  std::int32_t max_tokens);
+void gdn_input_proj(const Tensor& x, const Weight& qk_weight, const Weight& value_z_weight,
+                    Tensor& qkv, Tensor& z, LinearPolicy policy, WorkspaceArena& workspace,
+                    cudaStream_t stream);
+
 void gdn_input_proj(const Tensor& x, const Weight& qk_weight, const Weight& value_z_weight,
                     Tensor& qkv, Tensor& z, cudaStream_t stream);
 

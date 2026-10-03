@@ -14,6 +14,11 @@ enum class WeightFormat : std::uint8_t {
     W8G32F16S,
 };
 
+enum class ActivationCompute : std::uint8_t {
+    A16,
+    A8,
+};
+
 struct ShapeCase {
     std::int32_t n;
     std::int32_t k;
@@ -24,6 +29,7 @@ struct ShapeCase {
 
 bool cuda_available();
 
-int run_shape(std::string_view label, WeightFormat format, const ShapeCase& shape);
+int run_shape(std::string_view label, WeightFormat format, ActivationCompute activation_compute,
+              const ShapeCase& shape);
 
 } // namespace ninfer::test::linear_add

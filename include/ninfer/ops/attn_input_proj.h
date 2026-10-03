@@ -24,11 +24,23 @@ namespace ninfer::ops {
  * query_key is Q4G64_F16S and gate_value is Q5G64_F16S. The oracle exact-decodes each row and
  * evaluates every projection naively in FP64 from the represented inputs. The BF16 outputs are
  * promoted and compared directly with those ideal values; final output storage rounding belongs
- * to AttnInputProj's named A16 criterion, not the oracle. Production routes choose their private
- * accumulator and staging precision. Inputs and the four outputs must be mutually non-overlapping.
- * Current registered routes require no transient allocation. The Op has no persistent state side
- * effect.
+ * to AttnInputProj's selected A16 or A8 criterion, not the oracle. A16Only requires no
+ * workspace. AllowA8 uses private symmetric group-64 INT8 activation quantization and INT8
+ * contraction at every positive T, with FP32 cross-group accumulation.
+ *
+ * The policy-bearing form uses caller-owned call-scoped workspace sized by the capacity
+ * query for input_rows=5120 and the inclusive token interval. Inputs, weights, the four
+ * outputs, and live workspace must be mutually non-overlapping. There is no persistent
+ * state side effect. The convenience overload selects A16Only without transient storage.
  */
+[[nodiscard]] std::size_t attn_input_proj_workspace_capacity_bytes(std::int32_t input_rows,
+                                                                   LinearPolicy policy,
+                                                                   std::int32_t min_tokens,
+                                                                   std::int32_t max_tokens);
+void attn_input_proj(const Tensor& x, const Weight& query_key_weight,
+                     const Weight& gate_value_weight, Tensor& q, Tensor& gate, Tensor& k, Tensor& v,
+                     LinearPolicy policy, WorkspaceArena& workspace, cudaStream_t stream);
+
 void attn_input_proj(const Tensor& x, const Weight& query_key_weight,
                      const Weight& gate_value_weight, Tensor& q, Tensor& gate, Tensor& k, Tensor& v,
                      cudaStream_t stream);

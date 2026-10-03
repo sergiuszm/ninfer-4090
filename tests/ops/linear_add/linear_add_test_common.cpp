@@ -29,12 +29,24 @@ namespace {
 constexpr std::size_t kOutputScanWords = 1U << 20;
 constexpr double kBf16UnitRoundoff     = 1.0 / 256.0;
 
-// One criterion for the complete A16 fused Op. It is not selected by T, route, or kernel.
-constexpr ReductionCriterion kLinearAddA16Tolerance{
-    kBf16UnitRoundoff,
-    kBf16UnitRoundoff,
-    2.0 * kBf16UnitRoundoff,
-};
+// The criterion belongs to the activation-compute profile, not the weight storage
+// format or a private route. It is not selected by T, route, or kernel.
+constexpr ReductionCriterion tolerance_for(ActivationCompute activation_compute) {
+    switch (activation_compute) {
+    case ActivationCompute::A16:
+        return {kBf16UnitRoundoff, kBf16UnitRoundoff, 2.0 * kBf16UnitRoundoff};
+    // The A8 criterion includes private group-64 activation quantization error;
+    // the oracle still evaluates the original represented BF16 inputs.
+    case ActivationCompute::A8:
+        return {4.0e-2, 2.0e-2, 5.0e-2};
+    }
+    throw std::invalid_argument("linear_add test: unknown activation compute profile");
+}
+
+ops::LinearPolicy policy_for(ActivationCompute activation_compute) {
+    return activation_compute == ActivationCompute::A8 ? ops::LinearPolicy::AllowA8
+                                                       : ops::LinearPolicy::A16Only;
+}
 
 std::size_t checked_elements(std::int32_t first, std::int32_t second, const char* label) {
     if (first <= 0 || second <= 0) {
@@ -203,8 +215,8 @@ OutputRead read_output(const void* device, std::int32_t n, std::int32_t t,
 }
 
 int compare_output(std::string_view label, std::span<const double> actual,
-                   std::span<const double> reference) {
-    return verify_reduction(label, actual, reference, kLinearAddA16Tolerance);
+                   std::span<const double> reference, ActivationCompute activation_compute) {
+    return verify_reduction(label, actual, reference, tolerance_for(activation_compute));
 }
 
 int verify_preserved(const test::GuardedDeviceBuffer& device,
@@ -290,7 +302,13 @@ std::vector<float> materialize_weight_rows(const HostWeight& weight,
 
 bool cuda_available() { return !test::cuda_unavailable(); }
 
-int run_shape(std::string_view label, WeightFormat format, const ShapeCase& shape) {
+int run_shape(std::string_view label, WeightFormat format, ActivationCompute activation_compute,
+              const ShapeCase& shape) {
+    const QType admitted = qtype_for(format);
+    if (activation_compute == ActivationCompute::A8 && admitted != QType::Q5G64_F16S) {
+        throw std::invalid_argument("linear_add test: A8 is defined only for Q5 weights");
+    }
+    const ops::LinearPolicy policy         = policy_for(activation_compute);
     const std::vector<std::int32_t> tokens = conformance_tokens(shape);
     if (tokens.empty()) { throw std::invalid_argument("linear_add test: no token cases"); }
     const std::int32_t maximum_t = tokens.back();
@@ -314,11 +332,12 @@ int run_shape(std::string_view label, WeightFormat format, const ShapeCase& shap
     const Weight weight = make_device_weight_view(host_weight, device_weight.data());
 
     const std::size_t workspace_bytes =
-        ops::linear_add_workspace_capacity_bytes(qtype, shape.n, shape.k, 1, maximum_t);
+        ops::linear_add_workspace_capacity_bytes(qtype, shape.n, shape.k, policy, 1, maximum_t);
     WorkspaceArena workspace(std::max<std::size_t>(workspace_bytes, 256));
 
     int failures              = 0;
     std::size_t executed_peak = 0;
+    std::vector<double> previous_a8_output;
     for (const std::int32_t t : tokens) {
         const std::size_t output_words = checked_elements(shape.n, t, "output");
         test::GuardedDeviceBuffer output(output_words * sizeof(std::uint16_t));
@@ -332,7 +351,7 @@ int run_shape(std::string_view label, WeightFormat format, const ShapeCase& shap
         const std::string case_label = std::string(label) + " [" + std::to_string(shape.n) + "," +
                                        std::to_string(shape.k) + "] T=" + std::to_string(t);
         try {
-            ops::linear_add(input, weight, residual_out, workspace, nullptr);
+            ops::linear_add(input, weight, residual_out, policy, workspace, nullptr);
             test::cuda_check(cudaDeviceSynchronize(), "synchronize linear_add");
             if (t == 128 && format == WeightFormat::Q5G64F16S) {
                 cudaStream_t stream;
@@ -359,7 +378,7 @@ int run_shape(std::string_view label, WeightFormat format, const ShapeCase& shap
             continue;
         }
         const std::size_t exact_workspace =
-            ops::linear_add_workspace_capacity_bytes(qtype, shape.n, shape.k, t, t);
+            ops::linear_add_workspace_capacity_bytes(qtype, shape.n, shape.k, policy, t, t);
         if (workspace.used() != 0 || workspace.peak_used() != exact_workspace) {
             std::cerr << case_label << ": exact workspace query/execution high-water mismatch\n";
             ++failures;
@@ -371,11 +390,22 @@ int run_shape(std::string_view label, WeightFormat format, const ShapeCase& shap
         const OutputRead actual =
             read_output(output.data(), shape.n, t, oracle_rows, columns, case_label);
         failures += actual.failures;
+        if (activation_compute == ActivationCompute::A8) {
+            // Shared tokens must keep the same arithmetic across prefill widths.
+            const std::size_t shared = std::min(previous_a8_output.size(), actual.selected.size());
+            if (!std::equal(previous_a8_output.begin(), previous_a8_output.begin() + shared,
+                            actual.selected.begin())) {
+                std::cerr << case_label << ": A8 output changed with token extent\n";
+                ++failures;
+            }
+            previous_a8_output = actual.selected;
+        }
         failures += compare_output(
             case_label, actual.selected,
             std::span<const double>(
                 full_reference.data(),
-                checked_elements(static_cast<std::int32_t>(oracle_rows.size()), t, "reference")));
+                checked_elements(static_cast<std::int32_t>(oracle_rows.size()), t, "reference")),
+            activation_compute);
     }
     if (executed_peak != workspace_bytes) {
         std::cerr << label << ": interval workspace capacity has no executed high-water witness\n";

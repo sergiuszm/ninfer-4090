@@ -237,7 +237,8 @@ void validate_profile(const Profile& profile) {
          profile.activation_compute != ActivationCompute::A4) ||
         (fp8 && profile.activation_compute != ActivationCompute::A16 &&
          profile.activation_compute != ActivationCompute::A8) ||
-        (!nvfp4 && !fp8 && profile.activation_compute != ActivationCompute::A16)) {
+        (!nvfp4 && !fp8 && profile.activation_compute != ActivationCompute::A16 &&
+         !(q4 && profile.activation_compute == ActivationCompute::A8))) {
         throw std::invalid_argument("linear_swiglu test: invalid activation-compute profile");
     }
 }
@@ -305,6 +306,9 @@ int run_profile(std::string_view label, const Profile& profile,
     WorkspaceArena workspace(std::max<std::size_t>(workspace_bytes, 256));
 
     int failures        = 0;
+    // INT8 (A8) prefill quantizes per token, so a token's output must not depend on the batch
+    // width.
+    std::vector<double> previous_q4_a8_output;
     const auto run_case = [&](int tokens, bool replay) {
         const auto elements = checked_elements(profile.output_rows, tokens, "output size");
         test::GuardedDeviceBuffer output(elements * sizeof(std::uint16_t));
@@ -348,6 +352,17 @@ int run_profile(std::string_view label, const Profile& profile,
                 }
                 failures += output.verify_guards(label_case);
                 const auto actual = read_bf16_output(output, elements);
+                if (!replay && profile.qtype == QType::Q4G64_F16S &&
+                    profile.activation_compute == ActivationCompute::A8) {
+                    const std::size_t shared =
+                        std::min(previous_q4_a8_output.size(), actual.size());
+                    if (!std::equal(previous_q4_a8_output.begin(),
+                                    previous_q4_a8_output.begin() + shared, actual.begin())) {
+                        std::cerr << label_case << ": A8 output changed with token extent\n";
+                        ++failures;
+                    }
+                    previous_q4_a8_output = actual;
+                }
                 failures +=
                     compare_output(label_case, actual, expected.data(), profile.activation_compute);
                 if (replay)

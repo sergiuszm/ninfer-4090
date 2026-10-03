@@ -52,7 +52,9 @@ namespace ninfer::ops {
  *   rounding boundaries.
  *
  * Compute policy:
- *   Q5, W8, and BF16_CTRL admit only A16Only. NVFP4 admits A16Only and AllowA4. Row-scaled FP8
+ *   Q5 admits A16Only and AllowA8. AllowA8 uses private symmetric group-64 INT8 activation
+ *   quantization and INT8 contraction at every positive T, with FP32 cross-group accumulation.
+ *   W8 and BF16_CTRL admit only A16Only. NVFP4 admits A16Only and AllowA4. Row-scaled FP8
  *   admits A16Only and AllowA8. Each registration owns its production plan. A permissive policy
  *   allows the private resolver to select either qualified
  *   arithmetic profile; it does not itself prescribe a kernel.

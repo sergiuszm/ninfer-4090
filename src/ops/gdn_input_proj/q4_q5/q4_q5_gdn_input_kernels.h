@@ -2,9 +2,15 @@
 
 #include "core/tensor.h"
 
+#include "ops/common/int8_proj_launch.h"
+
 #include <cuda_runtime.h>
 
 namespace ninfer::ops::detail {
+
+void q4_q5_gdn_input_int8_launch(const Tensor& x, const Weight& qk_weight,
+                                 const Weight& value_z_weight, Tensor& qkv, Tensor& z,
+                                 const Int8ProjWorkspace& scratch, cudaStream_t stream);
 
 void q4_q5_gdn_input_independent_launch(const Tensor& x, const Weight& qk_weight,
                                         const Weight& value_z_weight, Tensor& qk, Tensor& value,

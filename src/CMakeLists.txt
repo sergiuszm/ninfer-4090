@@ -230,6 +230,12 @@ add_library(ninfer_ops STATIC
   ops/linear_add/w8/w8_linear_add_gemm_simt.cu
   ops/linear_add/w8/w8_linear_add_gemm_splitk.cu
   ops/linear_add/w8/w8_linear_add_plan.cpp
+  ops/common/act_quant_g64.cu
+  ops/common/int8_proj_launch.cu
+  ops/linear_add/q5/q5_linear_add_int8.cu
+  ops/attn_input_proj/q4_q5/q4_q5_attn_input_int8.cu
+  ops/gdn_input_proj/q4_q5/q4_q5_gdn_input_int8.cu
+  ops/linear_swiglu/q4/q4_linear_swiglu_int8.cu
   ops/linear_swiglu/q4/q4_linear_swiglu_gemm_mma.cu
   ops/linear_swiglu/q4/q4_linear_swiglu_gemv.cu
   ops/linear_swiglu/q4/q4_linear_swiglu_plan.cpp

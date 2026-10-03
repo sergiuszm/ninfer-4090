@@ -67,6 +67,16 @@ Tensor allocate_materialized_workspace(Allocator& allocator, std::int32_t rows, 
     return allocator.alloc(DType::BF16, {rows, cols});
 }
 
+template <class Allocator>
+Q4LinearSwiGluInt8Workspace allocate_int8_workspace(Allocator& allocator, std::int32_t k,
+                                                    std::int32_t cols) {
+    const auto padded_k = q4_linear_swiglu_int8_padded_k(k);
+    const auto tokens   = q4_linear_swiglu_int8_token_tile(cols);
+    Tensor codes        = allocator.alloc(DType::I8, {padded_k, tokens});
+    Tensor scales       = allocator.alloc(DType::FP32, {tokens, padded_k / 64});
+    return {static_cast<std::int8_t*>(codes.data), static_cast<float*>(scales.data)};
+}
+
 std::size_t materialized_workspace_bytes(std::int32_t rows, std::int32_t cols) {
     WorkspaceLayoutBuilder layout;
     (void)allocate_materialized_workspace(layout, rows, cols);
@@ -77,6 +87,8 @@ std::size_t materialized_workspace_bytes(std::int32_t rows, std::int32_t cols) {
 
 const char* q4_linear_swiglu_schedule_name(Q4LinearSwiGluScheduleId schedule) noexcept {
     switch (schedule) {
+    case Q4LinearSwiGluScheduleId::Int8Folded:
+        return "linear_swiglu.q4.int8.folded";
     case Q4LinearSwiGluScheduleId::GemvPair:
         return "linear_swiglu.q4.gemv.paired_rows";
     case Q4LinearSwiGluScheduleId::SmallTTiled:
@@ -94,7 +106,8 @@ const char* q4_linear_swiglu_schedule_name(Q4LinearSwiGluScheduleId schedule) no
 }
 
 bool q4_linear_swiglu_admits(const Q4LinearSwiGluProblem& problem) noexcept {
-    return supported_shape(problem) && problem.cols >= 1;
+    return supported_shape(problem) && problem.cols >= 1 &&
+           (problem.policy == LinearPolicy::A16Only || problem.policy == LinearPolicy::AllowA8);
 }
 
 Q4LinearSwiGluPlan q4_linear_swiglu_resolve_plan(const Q4LinearSwiGluProblem& problem) {
@@ -103,6 +116,11 @@ Q4LinearSwiGluPlan q4_linear_swiglu_resolve_plan(const Q4LinearSwiGluProblem& pr
             "q4 linear_swiglu: exact problem or column count is not admitted");
     }
 
+    if (problem.policy == LinearPolicy::AllowA8) {
+        WorkspaceLayoutBuilder layout;
+        (void)allocate_int8_workspace(layout, problem.k, problem.cols);
+        return {Q4LinearSwiGluScheduleId::Int8Folded, layout.peak_bytes(1), problem.policy};
+    }
     for (const RouteSpec& route : kRoutes) {
         if (!route.cols.contains(problem.cols)) { continue; }
         Q4LinearSwiGluPlan plan{
@@ -110,6 +128,8 @@ Q4LinearSwiGluPlan q4_linear_swiglu_resolve_plan(const Q4LinearSwiGluProblem& pr
             0,
         };
         switch (route.schedule) {
+        case Q4LinearSwiGluScheduleId::Int8Folded:
+            throw std::logic_error("INT8 route in A16 catalog");
         case Q4LinearSwiGluScheduleId::GemvPair:
         case Q4LinearSwiGluScheduleId::SmallTTiled:
         case Q4LinearSwiGluScheduleId::MmaSplitHalfPairR32C40:
@@ -128,12 +148,14 @@ Q4LinearSwiGluPlan q4_linear_swiglu_resolve_plan(const Q4LinearSwiGluProblem& pr
 std::size_t q4_linear_swiglu_capacity_workspace_bytes(std::int32_t gate_up_rows,
                                                       std::int32_t output_rows, std::int32_t k,
                                                       std::int32_t padded_k, std::int32_t min_cols,
-                                                      std::int32_t max_cols) {
+                                                      std::int32_t max_cols, LinearPolicy policy) {
     if (min_cols <= 0 || max_cols < min_cols) {
         throw std::invalid_argument("q4 linear_swiglu: invalid column interval");
     }
-    (void)q4_linear_swiglu_resolve_plan({gate_up_rows, output_rows, k, padded_k, min_cols});
-    (void)q4_linear_swiglu_resolve_plan({gate_up_rows, output_rows, k, padded_k, max_cols});
+    (void)q4_linear_swiglu_resolve_plan({gate_up_rows, output_rows, k, padded_k, min_cols, policy});
+    const auto maximum_plan =
+        q4_linear_swiglu_resolve_plan({gate_up_rows, output_rows, k, padded_k, max_cols, policy});
+    if (policy == LinearPolicy::AllowA8) { return maximum_plan.workspace_bytes; }
 
     std::size_t maximum = 0;
     for (const RouteSpec& route : kRoutes) {
@@ -148,13 +170,20 @@ std::size_t q4_linear_swiglu_capacity_workspace_bytes(std::int32_t gate_up_rows,
 
 void q4_linear_swiglu_execute_plan(const Q4LinearSwiGluPlan& plan, const Tensor& x, const Weight& w,
                                    Tensor& out, WorkspaceArena& ws, cudaStream_t stream) {
-    const Q4LinearSwiGluProblem problem{w.n, out.ne[0], x.ne[0], w.padded_shape[1], x.ne[1]};
+    const Q4LinearSwiGluProblem problem{w.n,     out.ne[0],  x.ne[0], w.padded_shape[1],
+                                        x.ne[1], plan.policy};
     const Q4LinearSwiGluPlan resolved = q4_linear_swiglu_resolve_plan(problem);
     if (resolved.schedule != plan.schedule || resolved.workspace_bytes != plan.workspace_bytes) {
         throw std::invalid_argument("q4 linear_swiglu: plan does not match the exact problem");
     }
 
     switch (plan.schedule) {
+    case Q4LinearSwiGluScheduleId::Int8Folded: {
+        auto scope   = ws.scope();
+        auto scratch = allocate_int8_workspace(ws, x.ne[0], x.ne[1]);
+        q4_linear_swiglu_int8_folded_launch(x, w, out, scratch, stream);
+        return;
+    }
     case Q4LinearSwiGluScheduleId::GemvPair:
         q4_linear_swiglu_gemv_pair_launch(x, w, out, stream);
         return;
@@ -183,8 +212,9 @@ void q4_linear_swiglu_execute_plan(const Q4LinearSwiGluPlan& plan, const Tensor&
 }
 
 void q4_linear_swiglu_dispatch(const Tensor& x, const Weight& w, Tensor& out, WorkspaceArena& ws,
-                               cudaStream_t stream) {
-    const Q4LinearSwiGluProblem problem{w.n, out.ne[0], x.ne[0], w.padded_shape[1], x.ne[1]};
+                               cudaStream_t stream, LinearPolicy policy) {
+    const Q4LinearSwiGluProblem problem{w.n,     out.ne[0], x.ne[0], w.padded_shape[1],
+                                        x.ne[1], policy};
     const Q4LinearSwiGluPlan plan = q4_linear_swiglu_resolve_plan(problem);
     q4_linear_swiglu_execute_plan(plan, x, w, out, ws, stream);
 }

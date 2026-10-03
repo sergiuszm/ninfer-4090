@@ -2744,6 +2744,30 @@ int main() {
                      "NINFER_QWEN3_6_27B_NVFP4_WEIGHTS nor a Qwen3.8 equivalent is set\n";
         return 77;
     }
+    if (scenario != nullptr && std::string_view(scenario) == "e8-host-replay") {
+        if (qwen38_groupwise == nullptr || *qwen38_groupwise == '\0') {
+            std::cerr << "e8-host-replay requires NINFER_QWEN3_8_27B_WEIGHTS\n";
+            return 1;
+        }
+        ninfer::EngineOptions configured                = engine_options(qwen38_groupwise);
+        configured.kv_cache                             = ninfer::KvCacheStorage::E8Group64;
+        configured.context_cache.device_state_slots     = 0;
+        configured.context_cache.host_state_slots       = 2;
+        configured.context_cache.host_kv_capacity_bytes = 0;
+        configured.context_cache.max_shared_prefixes    = 0;
+        ninfer::Engine engine(std::move(configured));
+        const int result =
+            exercise_rewrite_checkpoints(engine, RewriteCheckpointCacheTopology::PrivateOnly);
+        if (result != 0) { return result; }
+        const ninfer::RuntimeStats stats = engine.runtime_stats();
+        if (stats.state_d2h_count == 0 || stats.state_h2d_count == 0 ||
+            stats.main_kv_d2h_pages != 0 || stats.backend_kv_d2h_pages != 0) {
+            std::cerr << "E8 replay did not restore complete Host state with Device KV\n";
+            return 1;
+        }
+        std::cout << "ok: E8 Host replay preserves greedy tokens and tool-loop checkpoints\n";
+        return 0;
+    }
     if (scenario != nullptr && std::string_view(scenario) == "stream-observations") {
         const char* artifact = groupwise != nullptr && *groupwise != '\0' ? groupwise : nvfp4;
         if (artifact == nullptr || *artifact == '\0') {

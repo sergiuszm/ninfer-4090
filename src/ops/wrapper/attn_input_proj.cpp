@@ -220,9 +220,16 @@ std::size_t attn_input_proj_workspace_capacity_bytes(QType parent_qtype, std::in
     throw std::invalid_argument("attn_input_proj workspace: unsupported parent qtype");
 }
 
-void attn_input_proj(const Tensor& x, const Weight& query_key_weight,
-                     const Weight& gate_value_weight, Tensor& q, Tensor& gate, Tensor& k, Tensor& v,
-                     cudaStream_t stream) {
+namespace {
+
+void dispatch_split_parent(const Tensor& x, const Weight& query_key_weight,
+                           const Weight& gate_value_weight, Tensor& q, Tensor& gate, Tensor& k,
+                           Tensor& v, LinearPolicy policy, WorkspaceArena* workspace,
+                           cudaStream_t stream) {
+    validate_policy(policy);
+    if (policy == LinearPolicy::AllowA4) {
+        throw std::invalid_argument("attn_input_proj: Q4/Q5 parents admit only A16 or A8");
+    }
     constexpr std::int32_t kHidden = 5120;
     constexpr std::int32_t kQRows  = 6144;
     constexpr std::int32_t kKvRows = 1024;
@@ -236,7 +243,33 @@ void attn_input_proj(const Tensor& x, const Weight& query_key_weight,
     require_rowsplit(gate_value_weight, QType::Q5G64_F16S, kQRows + kKvRows, "gate/value weight");
 
     detail::q4_q5_attn_input_dispatch(x, query_key_weight, gate_value_weight, q, gate, k, v,
-                                      stream);
+                                      workspace, policy, stream);
+}
+
+} // namespace
+
+std::size_t attn_input_proj_workspace_capacity_bytes(std::int32_t input_rows, LinearPolicy policy,
+                                                     std::int32_t min_tokens,
+                                                     std::int32_t max_tokens) {
+    validate_policy(policy);
+    if (input_rows != 5120 || policy == LinearPolicy::AllowA4) {
+        throw std::invalid_argument("attn_input_proj workspace: unsupported Q4/Q5 profile");
+    }
+    return detail::q4_q5_attn_input_capacity_workspace_bytes(min_tokens, max_tokens, policy);
+}
+
+void attn_input_proj(const Tensor& x, const Weight& query_key_weight,
+                     const Weight& gate_value_weight, Tensor& q, Tensor& gate, Tensor& k, Tensor& v,
+                     LinearPolicy policy, WorkspaceArena& workspace, cudaStream_t stream) {
+    dispatch_split_parent(x, query_key_weight, gate_value_weight, q, gate, k, v, policy, &workspace,
+                          stream);
+}
+
+void attn_input_proj(const Tensor& x, const Weight& query_key_weight,
+                     const Weight& gate_value_weight, Tensor& q, Tensor& gate, Tensor& k, Tensor& v,
+                     cudaStream_t stream) {
+    dispatch_split_parent(x, query_key_weight, gate_value_weight, q, gate, k, v,
+                          LinearPolicy::A16Only, nullptr, stream);
 }
 
 void attn_input_proj(const Tensor& x, const Weight& query_key_gate_value_weight, Tensor& q,

@@ -48,11 +48,8 @@ std::size_t linear_swiglu_workspace_capacity_bytes(QType qtype, std::int32_t gat
         return 0;
     }
     if (qtype == QType::Q4G64_F16S) {
-        if (policy != LinearPolicy::A16Only) {
-            throw std::invalid_argument("linear_swiglu workspace: Q4 admits only A16");
-        }
         return detail::q4_linear_swiglu_capacity_workspace_bytes(
-            gate_up_rows, gate_up_rows / 2, input_rows, input_rows, min_tokens, max_tokens);
+            gate_up_rows, gate_up_rows / 2, input_rows, input_rows, min_tokens, max_tokens, policy);
     }
     if (qtype == QType::NVFP4 && gate_up_rows == 34816 && input_rows == 5120) {
         return detail::nvfp4_linear_swiglu_workspace_capacity_bytes(policy, min_tokens, max_tokens);
@@ -125,8 +122,8 @@ void linear_swiglu(const Tensor& x, const Weight& gate_up_weight, Tensor& out, L
         return;
     }
 
-    if (policy != LinearPolicy::A16Only) {
-        throw std::invalid_argument("linear_swiglu: Q4/W8 admit only A16");
+    if (policy != LinearPolicy::A16Only && !(q4_weight && policy == LinearPolicy::AllowA8)) {
+        throw std::invalid_argument("linear_swiglu: unsupported Q4/W8 compute policy");
     }
     if (!aligned_to(gate_up_weight.qdata, 16) ||
         !aligned_to(gate_up_weight.scales, w8_weight ? 16 : 4)) {
@@ -136,7 +133,7 @@ void linear_swiglu(const Tensor& x, const Weight& gate_up_weight, Tensor& out, L
     if (w8_weight) {
         detail::w8_linear_swiglu_dispatch(x, gate_up_weight, out, stream);
     } else {
-        detail::q4_linear_swiglu_dispatch(x, gate_up_weight, out, ws, stream);
+        detail::q4_linear_swiglu_dispatch(x, gate_up_weight, out, ws, stream, policy);
     }
 }
 

@@ -18,6 +18,7 @@ namespace {
 
 // This criterion belongs to the complete A16 GDN-input-projection Op.
 constexpr ReductionCriterion kGdnInputProjA16Tolerance{3.0e-3, 4.0e-3, 3.5e-3};
+constexpr ReductionCriterion kGdnInputProjA8Tolerance{4.0e-2, 2.0e-2, 5.0e-2};
 constexpr ReductionCriterion kFp8GdnInputProjA16Tolerance{1.0 / 256.0, 1.0 / 256.0, 2.0 / 256.0};
 constexpr ReductionCriterion kFp8GdnInputProjA8Tolerance{0.04, 1.0 / 256.0, 0.06};
 constexpr ReductionCriterion kGdnInputProjA4Tolerance{0.16, 4.0e-3, 0.16};
@@ -27,16 +28,17 @@ int verify_output_range(std::string_view label, const GuardedBf16Tensor& output,
                         std::int32_t full_rows, std::int32_t output_row_offset,
                         std::int32_t output_rows, const quantized_weight::PackedWeight& weight,
                         std::int32_t weight_row_offset, const std::vector<float>& activation,
-                        std::int32_t hidden, std::int32_t tokens) {
+                        std::int32_t hidden, std::int32_t tokens,
+                        const ReductionCriterion& criterion = kGdnInputProjA16Tolerance) {
     const std::vector<double> actual =
         gather_rows(output.values(), full_rows, output_row_offset, output_rows, tokens);
     const std::vector<double> expected =
         projection_oracle(weight, weight_row_offset, output_rows, activation, hidden, tokens);
-    return compare(label, actual, expected, kGdnInputProjA16Tolerance);
+    return compare(label, actual, expected, criterion);
 }
 
 int run_q4_q5_case(DevicePackedWeight& query_key, DevicePackedWeight& value_z_weight,
-                   std::int32_t tokens) {
+                   std::int32_t tokens, ops::LinearPolicy policy = ops::LinearPolicy::A16Only) {
     constexpr std::int32_t kHidden      = 5120;
     constexpr std::int32_t kQkRows      = 4096;
     constexpr std::int32_t kValueRows   = 6144;
@@ -50,20 +52,31 @@ int run_q4_q5_case(DevicePackedWeight& query_key, DevicePackedWeight& value_z_we
     Tensor x(device_activation.p, DType::BF16, {kHidden, tokens});
     Tensor output   = qkv.tensor();
     Tensor z_output = z.tensor();
-    ops::gdn_input_proj(x, query_key.view(), value_z_weight.view(), output, z_output, nullptr);
+    const bool a8   = policy == ops::LinearPolicy::AllowA8;
+    if (a8) {
+        const std::size_t bytes =
+            ops::gdn_input_proj_workspace_capacity_bytes(kHidden, policy, tokens, tokens);
+        WorkspaceArena workspace(std::max<std::size_t>(bytes, 256));
+        ops::gdn_input_proj(x, query_key.view(), value_z_weight.view(), output, z_output, policy,
+                            workspace, nullptr);
+    } else {
+        ops::gdn_input_proj(x, query_key.view(), value_z_weight.view(), output, z_output, nullptr);
+    }
     cuda_synchronize();
 
-    const std::string suffix = " Q4/Q5 A16 T=" + std::to_string(tokens);
-    int failures             = qkv.verify_guards("gdn qkv" + suffix);
+    const ReductionCriterion& criterion = a8 ? kGdnInputProjA8Tolerance : kGdnInputProjA16Tolerance;
+    const std::string suffix =
+        std::string(a8 ? " Q4/Q5 A8 T=" : " Q4/Q5 A16 T=") + std::to_string(tokens);
+    int failures = qkv.verify_guards("gdn qkv" + suffix);
     failures += z.verify_guards("gdn z" + suffix);
     failures += qkv.verify_fully_written("gdn qkv" + suffix);
     failures += z.verify_fully_written("gdn z" + suffix);
     failures += verify_output_range("gdn qk" + suffix, qkv, kRows, 0, kQkRows, query_key.host, 0,
-                                    activation, kHidden, tokens);
+                                    activation, kHidden, tokens, criterion);
     failures += verify_output_range("gdn value" + suffix, qkv, kRows, kQkRows, kValueRows,
-                                    value_z_weight.host, 0, activation, kHidden, tokens);
+                                    value_z_weight.host, 0, activation, kHidden, tokens, criterion);
     failures += verify_output_range("gdn z" + suffix, z, kZRows, 0, kZRows, value_z_weight.host,
-                                    kValueRows, activation, kHidden, tokens);
+                                    kValueRows, activation, kHidden, tokens, criterion);
     failures += verify_preserved("gdn x" + suffix, device_activation, activation_bits);
     failures += query_key.verify_preserved("gdn query/key weight" + suffix);
     failures += value_z_weight.verify_preserved("gdn value/z weight" + suffix);
@@ -79,6 +92,10 @@ int run_q4_q5() {
     int failures = 0;
     for (const std::int32_t tokens : {1, 2, 16, 17}) {
         failures += run_q4_q5_case(query_key, value_z_weight, tokens);
+    }
+    // AllowA8 shares the T <= 16 route with A16 and takes the INT8 jobs above it.
+    for (const std::int32_t tokens : {1, 16, 17, 48, 64, 128, 257, 1024, 4097}) {
+        failures += run_q4_q5_case(query_key, value_z_weight, tokens, ops::LinearPolicy::AllowA8);
     }
     return failures;
 }
