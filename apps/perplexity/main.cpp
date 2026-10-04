@@ -10,6 +10,7 @@
 #include <spdlog/logger.h>
 
 #include <algorithm>
+#include <cstdlib>
 #include <charconv>
 #include <chrono>
 #include <cctype>
@@ -48,15 +49,24 @@ struct Options {
     std::uint32_t stride                = 2048;
     int device                          = 0;
     ninfer::KvCacheStorage kv           = ninfer::KvCacheStorage::Fp8E4M3Row256;
+    ninfer::PrefillActivations prefill_activations = ninfer::PrefillActivations::A16;
     bool quick                          = false;
     ninfer::product::LogLevel log_level = ninfer::product::LogLevel::Info;
 };
+
+// NINFER_A16_PREFILL=1 forces A16 over the option, as in the engine (variant.cpp).
+const char* prefill_activations_in_effect(const Options& options) {
+    const char* forced = std::getenv("NINFER_A16_PREFILL");
+    if (forced != nullptr && forced[0] == '1') { return "a16"; }
+    return ninfer::prefill_activations_name(options.prefill_activations);
+}
 
 std::string usage_text() {
     return "usage: ninfer-perplexity <model.ninfer> "
            "(--corpus <manifest.json> [--quick] | --text <utf8-file>)\n"
            "       [--context N] [--stride N] [--device N]\n"
-           "       [--kv-dtype bf16|int8|fp8|nvfp4|k8v4] [--output <directory>]\n"
+           "       [--kv-dtype bf16|int8|fp8|nvfp4|k8v4] [--prefill-activations a16|int8]\n"
+           "       [--output <directory>]\n"
            "       [--log-level trace|debug|info|warning|error|critical|off]\n";
 }
 
@@ -115,6 +125,15 @@ Options parse_options(int argc, char** argv) {
                 out.kv = ninfer::KvCacheStorage::Fp8KeyNvfp4Value;
             } else {
                 usage_error("--kv-dtype must be bf16, int8, fp8, nvfp4, or k8v4");
+            }
+        } else if (option == "--prefill-activations") {
+            const std::string_view activations = value("--prefill-activations");
+            if (activations == "a16") {
+                out.prefill_activations = ninfer::PrefillActivations::A16;
+            } else if (activations == "int8") {
+                out.prefill_activations = ninfer::PrefillActivations::Int8;
+            } else {
+                usage_error("--prefill-activations must be a16 or int8");
             }
         } else if (option == "--output") {
             out.output = std::filesystem::path(value("--output"));
@@ -219,6 +238,7 @@ int run(const Options& options, const std::shared_ptr<spdlog::logger>& logger,
     engine_options.device           = options.device;
     engine_options.max_context      = options.context;
     engine_options.kv_cache         = options.kv;
+    engine_options.prefill_activations = options.prefill_activations;
     engine_options.startup_observer = startup_log.observer();
     ninfer::Engine engine(std::move(engine_options));
     const ninfer::LoadSummary load = engine.load_summary();
@@ -390,7 +410,8 @@ int run(const Options& options, const std::shared_ptr<spdlog::logger>& logger,
           {"stride_tokens", options.stride},
           {"prefill_chunk_tokens", 1024},
           {"score_tile_tokens", 1024},
-          {"kv_dtype", kv_name(options.kv)}}},
+          {"kv_dtype", kv_name(options.kv)},
+          {"prefill_activations", prefill_activations_in_effect(options)}}},
         {"timing",
          {{"load_seconds", load.load_seconds},
           {"read_and_tokenize_seconds", preflight_seconds},
@@ -416,7 +437,8 @@ int run(const Options& options, const std::shared_ptr<spdlog::logger>& logger,
 
     std::cout << "Perplexity result\n"
               << "artifact: " << load.model_id << " / " << load.weights_id << '\n'
-              << "kv: " << kv_name(options.kv) << ", corpus: " << corpus.corpus_id << " / "
+              << "kv: " << kv_name(options.kv)
+              << ", prefill activations: " << prefill_activations_in_effect(options) << ", corpus: " << corpus.corpus_id << " / "
               << corpus.mode << ", context/stride: " << options.context << '/' << options.stride
               << "\n\n";
     std::cout << std::left << std::setw(24) << "domain" << std::right << std::setw(16) << "tokens"

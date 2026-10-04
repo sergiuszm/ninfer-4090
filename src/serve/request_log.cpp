@@ -2,6 +2,7 @@
 #include "product/logging/pretty_format.h"
 #include "product/speculative_options.h"
 
+#include <cstdlib>
 #include <spdlog/logger.h>
 
 #include <cuda_runtime.h>
@@ -25,6 +26,12 @@
 
 namespace ninfer::serve {
 namespace {
+
+// Same rule as the engine's (variant.cpp) and the boot line's.
+bool a16_prefill_env() {
+    const char* value = std::getenv("NINFER_A16_PREFILL");
+    return value != nullptr && value[0] == '1';
+}
 
 using Json = nlohmann::json;
 
@@ -497,7 +504,11 @@ std::string format_server_start_json(
              {"prefill_chunk", engine_options.prefill_chunk},
              {"log_stats_interval_ms", options.log_stats_interval_ms},
              {"kv_cache", kv_cache_name(engine_options.kv_cache)},
+             // The mode in effect: NINFER_A16_PREFILL=1 forces A16 over the option (as the boot line says).
              {"prefill_activations",
+              a16_prefill_env() ? "a16"
+                                : ninfer::prefill_activations_name(engine_options.prefill_activations)},
+             {"prefill_activations_option",
               ninfer::prefill_activations_name(engine_options.prefill_activations)},
              {"vision", engine_options.enable_vision},
              {"cuda_graph", engine_options.use_cuda_graph},

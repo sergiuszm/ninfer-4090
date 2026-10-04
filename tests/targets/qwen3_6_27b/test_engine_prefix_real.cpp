@@ -16,6 +16,18 @@
 
 namespace {
 
+// Fork-local: NINFER_PREFIX_REAL_PREFILL_ACTIVATIONS=int8 builds every engine under test with INT8
+// dense prefill, so the reuse vs full-prefill greedy-equality checks cover the lossy mode too
+// (default a16, the product default).
+ninfer::PrefillActivations prefill_activations_under_test() {
+    const char* value = std::getenv("NINFER_PREFIX_REAL_PREFILL_ACTIVATIONS");
+    if (value == nullptr || *value == '\0') { return ninfer::PrefillActivations::A16; }
+    const std::string_view text(value);
+    if (text == "a16") { return ninfer::PrefillActivations::A16; }
+    if (text == "int8") { return ninfer::PrefillActivations::Int8; }
+    throw std::invalid_argument("NINFER_PREFIX_REAL_PREFILL_ACTIVATIONS: must be a16 or int8");
+}
+
 ninfer::EngineOptions engine_options(const char* artifact) {
     ninfer::EngineOptions options;
     options.artifact_path                    = artifact;
@@ -29,6 +41,7 @@ ninfer::EngineOptions engine_options(const char* artifact) {
     options.max_concurrency                  = 1;
     options.max_pending_requests             = 1;
     options.context_cache.device_state_slots = 4;
+    options.prefill_activations = prefill_activations_under_test();
     return options;
 }
 
@@ -66,6 +79,7 @@ ninfer::EngineOptions host_restore_engine_options(const char* artifact) {
     options.context_cache.max_private_continuations         = 2;
     options.context_cache.max_shared_prefixes               = 0;
     options.context_cache.max_long_anchors_per_continuation = 0;
+    options.prefill_activations = prefill_activations_under_test();
     return options;
 }
 
@@ -86,6 +100,7 @@ ninfer::EngineOptions shared_replacement_engine_options(const char* artifact) {
     options.context_cache.max_private_continuations         = 2;
     options.context_cache.max_shared_prefixes               = 1;
     options.context_cache.max_long_anchors_per_continuation = 0;
+    options.prefill_activations = prefill_activations_under_test();
     return options;
 }
 
@@ -105,6 +120,7 @@ ninfer::EngineOptions anthropic_prefix_regression_engine_options(const char* art
     options.context_cache.host_kv_capacity_bytes            = 512ULL << 20;
     options.context_cache.max_private_continuations         = 1;
     options.context_cache.max_long_anchors_per_continuation = 0;
+    options.prefill_activations = prefill_activations_under_test();
     return options;
 }
 
@@ -126,6 +142,7 @@ ninfer::EngineOptions shared_rewrite_materialization_engine_options(const char* 
     options.context_cache.max_private_continuations         = 2;
     options.context_cache.max_shared_prefixes               = 2;
     options.context_cache.max_long_anchors_per_continuation = 0;
+    options.prefill_activations = prefill_activations_under_test();
     return options;
 }
 
@@ -148,6 +165,7 @@ ninfer::EngineOptions shared_release_source_engine_options(const char* artifact)
     options.context_cache.max_private_continuations         = 8;
     options.context_cache.max_shared_prefixes               = 4;
     options.context_cache.max_long_anchors_per_continuation = 2;
+    options.prefill_activations = prefill_activations_under_test();
     return options;
 }
 
@@ -166,6 +184,7 @@ ninfer::EngineOptions private_long_anchor_engine_options(const char* artifact) {
     options.context_cache.max_private_continuations         = 2;
     options.context_cache.max_shared_prefixes               = 0;
     options.context_cache.max_long_anchors_per_continuation = 1;
+    options.prefill_activations = prefill_activations_under_test();
     return options;
 }
 
@@ -186,6 +205,7 @@ ninfer::EngineOptions last_alias_engine_options(const char* artifact) {
     options.context_cache.max_private_continuations         = 2;
     options.context_cache.max_shared_prefixes               = 0;
     options.context_cache.max_long_anchors_per_continuation = 0;
+    options.prefill_activations = prefill_activations_under_test();
     return options;
 }
 
@@ -206,6 +226,7 @@ ninfer::EngineOptions concurrent_engine_options(const char* artifact) {
     options.context_cache.max_private_continuations         = 8;
     options.context_cache.max_shared_prefixes               = 0;
     options.context_cache.max_long_anchors_per_continuation = 0;
+    options.prefill_activations = prefill_activations_under_test();
     return options;
 }
 
@@ -225,6 +246,7 @@ ninfer::EngineOptions pressure_resume_engine_options(const char* artifact) {
     options.context_cache.max_private_continuations         = 4;
     options.context_cache.max_shared_prefixes               = 0;
     options.context_cache.max_long_anchors_per_continuation = 0;
+    options.prefill_activations = prefill_activations_under_test();
     return options;
 }
 
@@ -244,6 +266,7 @@ ninfer::EngineOptions private_checkpoint_pressure_engine_options(const char* art
     options.context_cache.max_private_continuations         = 4;
     options.context_cache.max_shared_prefixes               = 0;
     options.context_cache.max_long_anchors_per_continuation = 0;
+    options.prefill_activations = prefill_activations_under_test();
     return options;
 }
 

@@ -828,7 +828,7 @@ The table lists executable defaults. The startup example selects a long-context 
 | `--response-store-max-records N` | maximum locally retained Responses objects | `1024` |
 | `--response-store-max-mib N` | total local Response envelope/Item/context budget | `256` |
 | `--kv-dtype bf16\|int8\|fp8\|nvfp4\|k8v4\|rk8v4\|rk4v4\|rk4v4-e8\|rk2v4-e8` | KV-cache storage; rotated and E8-lattice modes trade key/value precision for capacity; `nvfp4` and `k8v4` are upstream sm_120a modes, not available on the RTX 4090 | `bf16` |
-| `--prefill-activations a16\|int8` | precision of the groupwise Q4/Q5 dense body's prompt prefill: `int8` quantizes activations to group-64 INT8 (much faster prefill, about +0.04% perplexity on the quick set); decode, MTP and DFlash verify stay A16. `NINFER_A16_PREFILL=1` forces `a16` over the flag. Logged at boot and in the JSONL `server_start` | `a16` |
+| `--prefill-activations a16\|int8` | precision of the groupwise Q4/Q5 dense body's prompt prefill: `int8` quantizes activations to group-64 INT8 (much faster prefill, about +0.04% perplexity on the quick set); decode, MTP and DFlash verify stay A16. `NINFER_A16_PREFILL=1` forces `a16` over the flag. Logged at boot and in the JSONL `server_start` (`prefill_activations` is the mode in effect, `prefill_activations_option` the flag). Slot files and prefix reuse do not record the mode: a slot saved under one mode restores as is under the other, so clear slot files (and restart, which empties the prefix cache) before an A/B. `ninfer-perplexity` takes the same flag | `a16` |
 | `--spec mtp\|dflash\|dflash2` | speculative backend | off |
 | `--draft-tokens N` | MTP `1..5`; DFlash/DFlash2 `1..15` | unset |
 | `--lm-head-draft` | optimized proposal head | off |
