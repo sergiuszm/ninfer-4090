@@ -851,6 +851,69 @@ int test_tolerant_incremental_decoder() {
     return failures;
 }
 
+// Review of PR #14 (sergiuszm): tolerant mode must never run a call the model did not issue.
+int test_tolerant_never_runs_a_quoted_call() {
+    int failures = 0;
+    // 1. An undeclared tool whose value quotes a complete call to a declared one: strict returns
+    //    text, and the retry must not restart inside the failing call's own value.
+    {
+        const auto contract = contract_for("run_shell", Json{{"command", Json{{"type", "string"}}}});
+        const std::string text = tool_call(
+            "write_docs",
+            {{"text", "Example:\n" + tool_call("run_shell", {{"command", "rm -rf build"}})}});
+        const auto parsed = fi::parse_qwen_tool_call_output(text, 64, contract, true);
+        failures += check(!parsed.is_tool_call_response && parsed.content == text,
+                          "a call quoted inside a failing call's value was executed");
+    }
+    // 2. A call cut off (max_tokens) inside a value that quotes an example call: the example's
+    //    closes must not complete it.
+    {
+        const auto contract =
+            contract_for("write_file", Json{{"path", Json{{"type", "string"}}},
+                                            {"content", Json{{"type", "string"}}}});
+        const std::string text =
+            "<tool_call>\n<function=write_file>\n<parameter=path>\nREADME.md\n</parameter>\n"
+            "<parameter=content>\nUsage:\n" +
+            tool_call("write_file", {{"path", "x"}, {"content", "y"}}) + "\nThe rest of the file";
+        const auto parsed = fi::parse_qwen_tool_call_output(text, 64, contract, true);
+        failures += check(!parsed.is_tool_call_response,
+                          "a truncated call was completed with the closes of a quoted example");
+    }
+    // 3. Trailing prose that holds another call: the example must not run in place of the real one.
+    {
+        const auto contract = contract_for("run_shell", Json{{"command", Json{{"type", "string"}}}});
+        const std::string text = "Here is the format: " +
+                                 tool_call("run_shell", {{"command", "echo example"}}) +
+                                 " Now I will run the tests. " +
+                                 tool_call("run_shell", {{"command", "pytest"}});
+        const auto parsed = fi::parse_qwen_tool_call_output(text, 64, contract, true);
+        failures += check(!parsed.is_tool_call_response,
+                          "an example call before the real one was executed");
+    }
+    return failures;
+}
+
+int test_tolerant_trailing_details() {
+    const auto contract = contract_for("bash", Json{{"command", Json{{"type", "string"}}}});
+    const std::string call = tool_call("bash", {{"command", "ls"}});
+    int failures           = 0;
+    // 6. A stray duplicate close after a complete call is dropped, not shown.
+    const auto dup = fi::parse_qwen_tool_call_output(call + "\n</tool_call>", 64, contract, true);
+    failures += check(dup.is_tool_call_response && dup.tool_calls.size() == 1 && dup.content.empty(),
+                      "a stray </tool_call> became content: " + dup.content);
+    // 5. Streaming: the whitespace held back before the call separates the trailing prose.
+    const auto output = output_contract_for("bash", Json{{"command", Json{{"type", "string"}}}});
+    const std::string text = "Running the tests.\n" + call + "\nDone, waiting for output.";
+    fi::ToolCallOutputDecoder decoder(output, 64, true);
+    std::string visible;
+    for (std::size_t i = 0; i < text.size(); i += 5) { visible += decoder.feed(text.substr(i, 5)); }
+    const auto terminal = decoder.finish();
+    failures += check(terminal.tool_calls.size() == 1, "decoder did not keep the call");
+    failures += check(visible + terminal.content == "Running the tests.\nDone, waiting for output.",
+                      "trailing prose lost its separator: " + visible + "|" + terminal.content);
+    return failures;
+}
+
 int main() {
     int failures = 0;
     failures += test_basic_legacy_parsing();
@@ -877,6 +940,8 @@ int main() {
     failures += test_tolerant_prose_around_calls();
     failures += test_tolerant_keeps_unrecoverable_fallback();
     failures += test_tolerant_incremental_decoder();
+    failures += test_tolerant_never_runs_a_quoted_call();
+    failures += test_tolerant_trailing_details();
     if (failures == 0) { std::cout << "ok\n"; }
     return failures == 0 ? 0 : 1;
 }

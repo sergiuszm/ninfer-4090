@@ -516,8 +516,27 @@ int main() {
                     .at("schema_mismatch_arguments") == 2 &&
             normalized_tool_done.at("result").at("tool_call_parse").at("fallback_reason") ==
                 "none" &&
+            normalized_tool_done.at("result").at("tool_call_parse").at("recovered_from") ==
+                "none" &&
             !render_tool_call_fallback(context, normalized_tool_outcome),
         "successful tool-call normalization diagnostics are incomplete or noisy");
+
+    GenerationOutcome recovered_outcome = normalized_tool_outcome;
+    recovered_outcome.tool_call_parse.recovered_from =
+        ninfer::ToolCallParseFallbackReason::TrailingContent;
+    const Json recovered_done =
+        Json::parse(format_request_done_json("serve-test", 3004, context, recovered_outcome));
+    failures += check(recovered_done.at("result").at("tool_call_parse").at("recovered_from") ==
+                              "trailing_content" &&
+                          recovered_done.at("result").at("tool_call_parse").at("fallback_reason") ==
+                              "none",
+                      "tolerant recovery missing from JSONL");
+    const std::optional<OperationalRecord> recovered_info =
+        render_tool_call_fallback(context, recovered_outcome);
+    failures += check(recovered_info && recovered_info->severity == OperationalSeverity::Info &&
+                          recovered_info->message ==
+                              "req#7 tool markup recovered | trailing content",
+                      "tolerant recovery is silent in the operational log");
 
     GenerationOutcome fallback_outcome = outcome;
     fallback_outcome.tool_call_parse   = {
