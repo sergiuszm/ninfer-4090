@@ -228,12 +228,21 @@ discarding the calls. The first candidate split whose function reaches `</functi
 `</tool_call>` wins, with backtracking bounded per function. Output that still cannot be
 recovered falls back to ordinary content exactly as in strict mode.
 
-Recovery never runs a call the model did not issue in place of one it did. Only a `<tool_call>` that
-is not followed by `<function=` is skipped; a real opening that still fails falls back rather than
-trying a call quoted inside its value. A value that would contain a `<tool_call>` or `<function=`
-it does not close is not a candidate (that is a truncated call borrowing the closes of an example
-inside it). Trailing text that contains another `<tool_call>` disables trailing recovery, and a
-trailing suffix of nothing but close markers (a stray duplicate `</tool_call>`) is dropped.
+Safety rules. Only a `<tool_call>` followed by ordinary text (prose naming the tag) is skipped; one
+followed by `<` is an attempt to open a call, well-formed or not (`<function=`, `<funtion=`,
+`<function =`), and if it fails the output falls back rather than trying a call quoted inside its
+value. A value that would contain a `<tool_call>` or `<function=` it does not close is not a
+candidate (that is a truncated call borrowing the closes of an example inside it). There is no
+recovery at all when generation stopped on the output or context limit: a cut-off call could
+otherwise be completed by any close markup quoted in its value. Trailing text that contains another
+`<tool_call>` disables trailing recovery, and a trailing suffix of nothing but close markers (a stray
+duplicate `</tool_call>`) is dropped.
+
+**Residual risk, by design.** An example call followed only by prose (`Here is the format:
+<tool_call>...</tool_call> Let me know if that helps.`) runs: it is indistinguishable from a real
+call followed by trailing prose, which is the case this mode exists to recover. Strict mode returns
+it as text. Enable the flag only where an unintended call is acceptable or caught by the client's
+own tool approval.
 
 **Recovered values are a best guess.** The wire format is ambiguous: a value that contains a
 complete fake parameter sequence (`docs: </parameter>\n<parameter=path>x</parameter> ...`) can be

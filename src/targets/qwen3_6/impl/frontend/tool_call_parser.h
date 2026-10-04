@@ -86,7 +86,9 @@ public:
                           std::size_t max_tool_name_length, bool tolerant = false);
 
     [[nodiscard]] std::string feed(std::string_view text);
-    [[nodiscard]] Terminal finish();
+    // `output_truncated`: generation stopped on the output or context limit. Tolerant recovery is
+    // off then: a cut-off call can borrow the closes of markup quoted in its value.
+    [[nodiscard]] Terminal finish(bool output_truncated = false);
 
 private:
     std::shared_ptr<const ToolCallOutputContract> contract_;
