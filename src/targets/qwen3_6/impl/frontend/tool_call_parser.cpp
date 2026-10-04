@@ -407,6 +407,42 @@ NormalizedParameter normalize_parameter(std::string_view encoded_value,
     return {.json_value = encode_json_string(value)};
 }
 
+std::size_t count_occurrences(std::string_view text, std::string_view token) {
+    std::size_t count = 0;
+    for (std::size_t at = text.find(token); at != std::string_view::npos;
+         at             = text.find(token, at + token.size())) {
+        ++count;
+    }
+    return count;
+}
+
+// A recovered value must not hold a call or function that it opens but does not close: such a value
+// is a truncated call borrowing the closes of a call quoted inside it. Unbalanced parameter markers
+// are allowed - recovering those is the point of tolerant mode.
+bool opens_unclosed_call(std::string_view value) {
+    return count_occurrences(value, kToolOpen) > count_occurrences(value, kToolClose) ||
+           count_occurrences(value, kFunctionOpen) > count_occurrences(value, kFunctionClose);
+}
+
+// Text after complete calls that is only close markers (a stray duplicate `</tool_call>`) is noise,
+// not prose to show.
+bool only_close_markers(std::string_view text) {
+    std::size_t pos = 0;
+    for (;;) {
+        skip_format_whitespace(text, pos);
+        if (pos == text.size()) { return true; }
+        if (starts_with_at(text, pos, kToolClose)) {
+            pos += kToolClose.size();
+        } else if (starts_with_at(text, pos, kFunctionClose)) {
+            pos += kFunctionClose.size();
+        } else if (starts_with_at(text, pos, kParamClose)) {
+            pos += kParamClose.size();
+        } else {
+            return false;
+        }
+    }
+}
+
 class QwenToolRegionParser {
 public:
     QwenToolRegionParser(std::string_view text, std::size_t max_name_length,
@@ -424,8 +460,15 @@ public:
                 return calls.empty() ? FallbackReason::MalformedStructure : FallbackReason::None;
             }
             if (!starts_with_at(text_, pos, kToolOpen)) {
+                // Tolerant: prose after complete calls is kept as content - unless it holds another
+                // call (an example before the real one would run instead of it), and a suffix of
+                // nothing but close markers is dropped.
                 if (tolerant_ && !calls.empty() && trailing_begin != nullptr) {
-                    *trailing_begin = pos;
+                    const std::string_view rest = text_.substr(pos);
+                    if (rest.find(kToolOpen) != std::string_view::npos) {
+                        return FallbackReason::TrailingContent;
+                    }
+                    if (!only_close_markers(rest)) { *trailing_begin = pos; }
                     return FallbackReason::None;
                 }
                 return calls.empty() ? FallbackReason::MalformedStructure
@@ -511,6 +554,19 @@ private:
     // Bounds the backtracking below; real calls carry a handful of parameters.
     static constexpr std::size_t kMaxParameterAttempts = 64;
 
+    // Every `</parameter>` of the region that is followed by structure, found once per parse rather
+    // than once per attempt (a long broken output used to be rescanned on each backtrack).
+    const std::vector<std::size_t>& structural_closes() const {
+        if (!closes_ready_) {
+            for (std::size_t close                      = text_.find(kParamClose);
+                 close != std::string_view::npos; close = text_.find(kParamClose, close + 1)) {
+                if (followed_by_structure(close + kParamClose.size())) { closes_.push_back(close); }
+            }
+            closes_ready_ = true;
+        }
+        return closes_;
+    }
+
     // `pos` is a parameter-name open position; true when a valid `<parameter=NAME>` starts there.
     bool parameter_open_at(std::size_t pos) const {
         if (!starts_with_at(text_, pos, kParamOpen)) { return false; }
@@ -559,13 +615,14 @@ private:
         std::size_t balanced    = 0;
         const bool has_balanced = find_parameter_close(value_begin, balanced);
         if (has_balanced) { candidates.push_back(balanced); }
-        for (std::size_t close                      = text_.find(kParamClose, value_begin);
-             close != std::string_view::npos; close = text_.find(kParamClose, close + 1)) {
-            if ((!has_balanced || close != balanced) &&
-                followed_by_structure(close + kParamClose.size())) {
-                candidates.push_back(close);
-            }
+        const std::vector<std::size_t>& closes = structural_closes();
+        for (auto it = std::lower_bound(closes.begin(), closes.end(), value_begin);
+             it != closes.end(); ++it) {
+            if (!has_balanced || *it != balanced) { candidates.push_back(*it); }
         }
+        std::erase_if(candidates, [&](std::size_t close) {
+            return opens_unclosed_call(text_.substr(value_begin, close - value_begin));
+        });
 
         FallbackReason first_failure = FallbackReason::MalformedStructure;
         for (std::size_t index = 0; index < candidates.size() && budget > 0; ++index) {
@@ -627,6 +684,8 @@ private:
     std::size_t max_name_length_;
     const Contract& contract_;
     bool tolerant_ = false;
+    mutable std::vector<std::size_t> closes_;
+    mutable bool closes_ready_ = false;
 };
 
 GeneratedToolCall normalize_raw_tool_call(const RawToolCall& raw, const Contract& contract,
@@ -704,23 +763,33 @@ ParsedToolCallOutput parse_qwen_tool_call_output(const std::string& text,
         if (!tolerant) { return fallback(text, out.diagnostics); }
 
         // Tolerant retry from each `<tool_call>` in order: the first start whose region parses
-        // wins, text before it is content, prose after the calls is appended to content.
+        // wins, text before it is content, prose after the calls is appended to content. Only a
+        // marker that does not open a call (prose naming the tag) is skipped: a real opening that
+        // still fails falls back, so a call quoted inside its value can never run in its place.
         for (std::size_t start = first; start != std::string::npos;
              start             = text.find(kToolOpen, start + 1)) {
+            std::size_t after = start + kToolOpen.size();
+            skip_format_whitespace(text, after);
+            const bool opens_call = starts_with_at(text, after, kFunctionOpen);
+            if (!opens_call) { continue; }
             std::vector<RawToolCall> recovered;
             std::size_t trailing_begin    = std::string_view::npos;
             const std::string_view region = std::string_view(text).substr(start);
             const QwenToolRegionParser tolerant_parser(region, max_tool_name_length, contract,
                                                        true);
             if (tolerant_parser.parse(recovered, &trailing_begin) != FallbackReason::None) {
-                continue;
+                break;
             }
-            raw_calls   = std::move(recovered);
-            out.content = rtrim_format_whitespace(std::string_view(text).substr(0, start));
+            raw_calls                   = std::move(recovered);
+            const std::string_view head = std::string_view(text).substr(0, start);
+            out.content                 = rtrim_format_whitespace(head);
             if (trailing_begin != std::string_view::npos) {
                 const std::string_view trailing =
                     trim_format_whitespace(region.substr(trailing_begin));
-                if (!out.content.empty() && !trailing.empty()) { out.content.append("\n\n"); }
+                // With nothing before the calls in this text, the separator is the whitespace the
+                // model wrote before them (the streaming decoder holds it back and has already
+                // shown the prose before it); otherwise a paragraph break.
+                if (!trailing.empty()) { out.content.append(out.content.empty() ? head : "\n\n"); }
                 out.content.append(trailing);
             }
             out.diagnostics.recovered_from  = failure;

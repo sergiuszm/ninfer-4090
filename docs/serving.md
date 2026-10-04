@@ -228,6 +228,20 @@ discarding the calls. The first candidate split whose function reaches `</functi
 `</tool_call>` wins, with backtracking bounded per function. Output that still cannot be
 recovered falls back to ordinary content exactly as in strict mode.
 
+Recovery never runs a call the model did not issue in place of one it did. Only a `<tool_call>` that
+is not followed by `<function=` is skipped; a real opening that still fails falls back rather than
+trying a call quoted inside its value. A value that would contain a `<tool_call>` or `<function=`
+it does not close is not a candidate (that is a truncated call borrowing the closes of an example
+inside it). Trailing text that contains another `<tool_call>` disables trailing recovery, and a
+trailing suffix of nothing but close markers (a stray duplicate `</tool_call>`) is dropped.
+
+**Recovered values are a best guess.** The wire format is ambiguous: a value that contains a
+complete fake parameter sequence (`docs: </parameter>\n<parameter=path>x</parameter> ...`) can be
+split in more than one valid way, and recovery takes the first split that parses, which is not
+always the one the model meant. Strict mode returns such output as text instead. Each recovered call
+is logged at info level (`tool markup recovered | <reason>`) and in the request JSONL
+(`tool_call_parse.recovered_from`).
+
 Message roles retain their input order through schema translation. The Qwen family frontend maps
 both `system` and `developer` to system-class ChatML blocks at their original positions; it does not
 move later instructions to the beginning of the conversation. A leading instruction keeps the
