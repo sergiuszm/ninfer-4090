@@ -2,6 +2,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include <chrono>
 #include <initializer_list>
 #include <iostream>
 #include <memory>
@@ -893,6 +894,60 @@ int test_tolerant_never_runs_a_quoted_call() {
     return failures;
 }
 
+// Second review of PR #14 (sergiuszm).
+int test_tolerant_second_review() {
+    int failures = 0;
+    // 1. A malformed outer opener is an opening attempt, not prose: the complete call quoted in its
+    //    value must not run.
+    for (const std::string opener : {"<funtion=write_docs>", "<function =write_docs>"}) {
+        const auto contract = contract_for("run_shell", Json{{"command", Json{{"type", "string"}}}});
+        const std::string text =
+            "<tool_call>\n" + opener + "\n<parameter=text>\nExample:\n" +
+            tool_call("run_shell", {{"command", "rm -rf build"}}) +
+            "\n</parameter>\n</function>\n</tool_call>";
+        const auto parsed = fi::parse_qwen_tool_call_output(text, 64, contract, true);
+        failures += check(!parsed.is_tool_call_response && parsed.content == text,
+                          "a call quoted inside a malformed opener ran: " + opener);
+    }
+    // 2. Output cut off by the limit through a value that quotes only the end of a call: no
+    //    recovery once generation stopped on the limit.
+    {
+        const auto output =
+            output_contract_for("write_file", Json{{"path", Json{{"type", "string"}}},
+                                                   {"content", Json{{"type", "string"}}}});
+        const std::string text =
+            "<tool_call>\n<function=write_file>\n<parameter=path>\ndocs/end.md\n</parameter>\n"
+            "<parameter=content>\n# How a call ends\nA call ends with:\n</parameter>\n</function>\n"
+            "</tool_call>\nand then the";
+        for (const bool truncated : {false, true}) {
+            fi::ToolCallOutputDecoder decoder(output, 64, true);
+            const std::string visible = decoder.feed(text);
+            const auto terminal       = decoder.finish(truncated);
+            if (truncated) {
+                failures += check(terminal.tool_calls.empty() && visible + terminal.content == text,
+                                  "a call cut off by the output limit was recovered");
+            } else {
+                failures += check(terminal.tool_calls.size() == 1,
+                                  "control: the same text without the limit should recover");
+            }
+        }
+    }
+    // 3. Cost stays bounded by the attempt budget on long broken output.
+    {
+        const auto contract = contract_for("write_file", Json{{"content", Json{{"type", "string"}}}});
+        std::string text    = "<tool_call>\n<function=write_file>\n<parameter=content>\n";
+        while (text.size() < (1u << 20)) { text += "x\n</parameter>\n<parameter=p>\n"; }
+        const auto begin  = std::chrono::steady_clock::now();
+        const auto parsed = fi::parse_qwen_tool_call_output(text, 64, contract, true);
+        const auto ms     = std::chrono::duration_cast<std::chrono::milliseconds>(
+                            std::chrono::steady_clock::now() - begin)
+                            .count();
+        failures += check(!parsed.is_tool_call_response, "1 MB broken output was recovered");
+        failures += check(ms < 1000, "1 MB broken output took " + std::to_string(ms) + " ms");
+    }
+    return failures;
+}
+
 int test_tolerant_trailing_details() {
     const auto contract = contract_for("bash", Json{{"command", Json{{"type", "string"}}}});
     const std::string call = tool_call("bash", {{"command", "ls"}});
@@ -942,6 +997,7 @@ int main() {
     failures += test_tolerant_incremental_decoder();
     failures += test_tolerant_never_runs_a_quoted_call();
     failures += test_tolerant_trailing_details();
+    failures += test_tolerant_second_review();
     if (failures == 0) { std::cout << "ok\n"; }
     return failures == 0 ? 0 : 1;
 }

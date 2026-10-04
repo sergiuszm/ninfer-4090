@@ -407,21 +407,31 @@ NormalizedParameter normalize_parameter(std::string_view encoded_value,
     return {.json_value = encode_json_string(value)};
 }
 
-std::size_t count_occurrences(std::string_view text, std::string_view token) {
-    std::size_t count = 0;
+std::vector<std::size_t> marker_positions(std::string_view text, std::string_view token) {
+    std::vector<std::size_t> positions;
     for (std::size_t at = text.find(token); at != std::string_view::npos;
          at             = text.find(token, at + token.size())) {
-        ++count;
+        positions.push_back(at);
     }
-    return count;
+    return positions;
 }
 
-// A recovered value must not hold a call or function that it opens but does not close: such a value
-// is a truncated call borrowing the closes of a call quoted inside it. Unbalanced parameter markers
-// are allowed - recovering those is the point of tolerant mode.
-bool opens_unclosed_call(std::string_view value) {
-    return count_occurrences(value, kToolOpen) > count_occurrences(value, kToolClose) ||
-           count_occurrences(value, kFunctionOpen) > count_occurrences(value, kFunctionClose);
+// Markers of `token` (positions from marker_positions) that lie wholly inside [begin, end).
+std::size_t count_within(const std::vector<std::size_t>& positions, std::size_t token_size,
+                         std::size_t begin, std::size_t end) {
+    if (end < begin + token_size) { return 0; }
+    const auto first = std::lower_bound(positions.begin(), positions.end(), begin);
+    const auto last  = std::upper_bound(first, positions.end(), end - token_size);
+    return static_cast<std::size_t>(last - first);
+}
+
+// Tolerant retry: a `<tool_call>` followed (after format whitespace) by `<` is an attempt to open a
+// call, well-formed or not (`<function=`, `<funtion=`, `<function =`); one followed by ordinary
+// text is prose naming the tag.
+bool opener_attempt(std::string_view text, std::size_t marker) {
+    std::size_t after = marker + kToolOpen.size();
+    skip_format_whitespace(text, after);
+    return after < text.size() && text[after] == '<';
 }
 
 // Text after complete calls that is only close markers (a stray duplicate `</tool_call>`) is noise,
@@ -620,14 +630,13 @@ private:
              it != closes.end(); ++it) {
             if (!has_balanced || *it != balanced) { candidates.push_back(*it); }
         }
-        std::erase_if(candidates, [&](std::size_t close) {
-            return opens_unclosed_call(text_.substr(value_begin, close - value_begin));
-        });
-
         FallbackReason first_failure = FallbackReason::MalformedStructure;
+        bool tried                   = false;
         for (std::size_t index = 0; index < candidates.size() && budget > 0; ++index) {
-            --budget;
             const std::size_t close = candidates[index];
+            // Checked only when tried, in O(log n), so the attempt budget bounds the cost.
+            if (opens_unclosed_call(value_begin, close)) { continue; }
+            --budget;
             call.parameters.push_back(RawParameter{
                 .name = name, .value = text_.substr(value_begin, close - value_begin)});
             std::size_t next             = close + kParamClose.size();
@@ -637,9 +646,27 @@ private:
                 return FallbackReason::None;
             }
             call.parameters.pop_back();
-            if (index == 0) { first_failure = failure; }
+            if (!tried) { first_failure = failure; }
+            tried = true;
         }
         return first_failure;
+    }
+
+    // A recovered value must not hold a call or function that it opens but does not close: such a
+    // value is a truncated call borrowing the closes of a call quoted inside it. Unbalanced parameter
+    // markers are allowed - recovering those is the point of tolerant mode.
+    bool opens_unclosed_call(std::size_t begin, std::size_t end) const {
+        if (!markers_ready_) {
+            tool_opens_     = marker_positions(text_, kToolOpen);
+            tool_closes_    = marker_positions(text_, kToolClose);
+            function_opens_ = marker_positions(text_, kFunctionOpen);
+            function_closes_ = marker_positions(text_, kFunctionClose);
+            markers_ready_  = true;
+        }
+        return count_within(tool_opens_, kToolOpen.size(), begin, end) >
+                   count_within(tool_closes_, kToolClose.size(), begin, end) ||
+               count_within(function_opens_, kFunctionOpen.size(), begin, end) >
+                   count_within(function_closes_, kFunctionClose.size(), begin, end);
     }
 
     bool find_parameter_open_before(std::size_t scan, std::size_t limit,
@@ -686,6 +713,11 @@ private:
     bool tolerant_ = false;
     mutable std::vector<std::size_t> closes_;
     mutable bool closes_ready_ = false;
+    mutable std::vector<std::size_t> tool_opens_;
+    mutable std::vector<std::size_t> tool_closes_;
+    mutable std::vector<std::size_t> function_opens_;
+    mutable std::vector<std::size_t> function_closes_;
+    mutable bool markers_ready_ = false;
 };
 
 GeneratedToolCall normalize_raw_tool_call(const RawToolCall& raw, const Contract& contract,
@@ -764,14 +796,12 @@ ParsedToolCallOutput parse_qwen_tool_call_output(const std::string& text,
 
         // Tolerant retry from each `<tool_call>` in order: the first start whose region parses
         // wins, text before it is content, prose after the calls is appended to content. Only a
-        // marker that does not open a call (prose naming the tag) is skipped: a real opening that
-        // still fails falls back, so a call quoted inside its value can never run in its place.
+        // marker followed by ordinary text (prose naming the tag) is skipped: an opening attempt
+        // that fails, well-formed or malformed, falls back, so a call quoted inside its value can
+        // never run in its place.
         for (std::size_t start = first; start != std::string::npos;
              start             = text.find(kToolOpen, start + 1)) {
-            std::size_t after = start + kToolOpen.size();
-            skip_format_whitespace(text, after);
-            const bool opens_call = starts_with_at(text, after, kFunctionOpen);
-            if (!opens_call) { continue; }
+            if (!opener_attempt(text, start)) { continue; }
             std::vector<RawToolCall> recovered;
             std::size_t trailing_begin    = std::string_view::npos;
             const std::string_view region = std::string_view(text).substr(start);
@@ -861,13 +891,14 @@ std::string ToolCallOutputDecoder::feed(std::string_view text) {
     return visible;
 }
 
-ToolCallOutputDecoder::Terminal ToolCallOutputDecoder::finish() {
+ToolCallOutputDecoder::Terminal ToolCallOutputDecoder::finish(bool output_truncated) {
     if (finished_) { throw std::logic_error("tool-call output decoder is already finished"); }
     finished_ = true;
     if (!contract_) { return {}; }
 
     ParsedToolCallOutput parsed =
-        parse_qwen_tool_call_output(tool_region_, max_tool_name_length_, *contract_, tolerant_);
+        parse_qwen_tool_call_output(tool_region_, max_tool_name_length_, *contract_,
+                                    tolerant_ && !output_truncated);
     if (saw_tool_marker_ && parsed.is_tool_call_response) {
         trailing_whitespace_.clear();
         tool_region_.clear();

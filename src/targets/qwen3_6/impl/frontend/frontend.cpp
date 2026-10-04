@@ -1016,6 +1016,7 @@ public:
     std::vector<GeneratedToolCall> tool_calls;
     ToolCallParseDiagnostics tool_call_parse;
     bool preview_ready = false;
+    FinishReason preview_finish = FinishReason::None;
 };
 
 std::span<const std::int32_t> PreparedPromptData::position_axis(int axis) const {
@@ -1124,6 +1125,7 @@ runtime::OutputDecision OutputSession::preview_model(std::span<const TokenId> to
                               runtime::ContinuationAction continuation =
                                   runtime::ContinuationAction::Decode) {
         if (reason != FinishReason::None) { impl_->preview_semantic.control_pending = false; }
+        impl_->preview_finish = reason;
         if (impl_->preview_execution_split_after && *impl_->preview_execution_split_after > count) {
             throw std::logic_error("prefix execution split exceeds the accepted token prefix");
         }
@@ -1265,6 +1267,7 @@ runtime::OutputDecision OutputSession::preview_control(std::span<const TokenId> 
     impl_->preview_semantic.control_pending = false;
     impl_->preview_semantic.applied         = true;
     impl_->preview_semantic.injected_tokens = static_cast<std::uint32_t>(tokens.size());
+    impl_->preview_finish                   = FinishReason::None;
     impl_->preview_ready                    = true;
     return runtime::OutputDecision{
         .accepted_tokens              = static_cast<std::uint32_t>(tokens.size()),
@@ -1304,7 +1307,8 @@ runtime::OutputDecision OutputSession::preview_terminal(FinishReason reason) {
     impl_->preview_semantic.control_pending = false;
     impl_->preview_output.clear();
     terminalize(impl_->preview_state, impl_->policy, impl_->preview_output, 0);
-    impl_->preview_ready = true;
+    impl_->preview_finish = reason;
+    impl_->preview_ready  = true;
     return runtime::OutputDecision{.accepted_tokens = 0, .finish_reason = reason};
 }
 
@@ -1324,7 +1328,9 @@ PublishedOutput OutputSession::commit_preview() {
         }
     }
     if (impl_->state.terminal) {
-        fi::ToolCallOutputDecoder::Terminal terminal = impl_->tool_call_output.finish();
+        const bool truncated = impl_->preview_finish == FinishReason::OutputLimit ||
+                               impl_->preview_finish == FinishReason::ContextCapacity;
+        fi::ToolCallOutputDecoder::Terminal terminal = impl_->tool_call_output.finish(truncated);
         impl_->tool_calls                            = std::move(terminal.tool_calls);
         impl_->tool_call_parse                       = terminal.diagnostics;
         if (!terminal.content.empty()) {
