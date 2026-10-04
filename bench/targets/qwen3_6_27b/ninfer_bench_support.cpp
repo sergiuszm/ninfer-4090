@@ -305,6 +305,7 @@ std::string usage_text(std::string_view program) {
         << " (default: " << kDefaultPrefillChunk << ")\n"
         << "  --kv-dtype <bf16|int8|fp8|nvfp4|k8v4|rk8v4|rk4v4|rk4v4-e8|rk2v4-e8>  KV cache "
            "storage (default: bf16)\n"
+        << "  --prefill-activations <a16|int8>  dense prefill precision (default: a16)\n"
         << "  --spec <mtp|dflash|dflash2> speculative backend (default: none)\n"
         << "  --draft-tokens <n>         MTP 1..5; DFlash/DFlash2 1..15\n"
         << "  --lm-head-draft             use the optimized proposal head; requires a speculative "
@@ -359,6 +360,15 @@ BenchOptions parse_args(int argc, char** argv) {
             options.prefill_chunk = parse_u32(value("--prefill-chunk"), "prefill-chunk");
         } else if (arg == "--kv-dtype") {
             options.kv_cache = parse_kv_cache(value("--kv-dtype"));
+        } else if (arg == "--prefill-activations") {
+            const std::string activations = value("--prefill-activations");
+            if (activations == "a16") {
+                options.prefill_activations = PrefillActivations::A16;
+            } else if (activations == "int8") {
+                options.prefill_activations = PrefillActivations::Int8;
+            } else {
+                throw std::invalid_argument("--prefill-activations must be a16 or int8");
+            }
         } else if (arg == "--spec") {
             options.speculative.backend = product::parse_speculative_backend(value("--spec"));
         } else if (arg == "--draft-tokens") {

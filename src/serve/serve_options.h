@@ -55,6 +55,7 @@ struct ServeOptions {
     std::size_t response_store_max_bytes   = kDefaultResponseStoreBytes;
     int device                             = 0;
     KvCacheStorage kv_cache                = KvCacheStorage::BFloat16;
+    PrefillActivations prefill_activations = PrefillActivations::A16;
     SpeculativeOptions speculative;
     ContextCacheOptions context_cache;
     bool enable_vision              = false;

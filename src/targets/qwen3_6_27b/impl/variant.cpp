@@ -11,6 +11,7 @@
 #include "ninfer/ops/residual_add.h"
 #include "ninfer/ops/silu_mul.h"
 
+#include <atomic>
 #include <cstdlib>
 #include <algorithm>
 #include <stdexcept>
@@ -100,14 +101,17 @@ std::size_t gdn_record_workspace_bytes(const Tensor& hidden,
             parent.qtype, parent.n, parent.k, text_policy(parent), batch, width, width));
 }
 
-// INT8 group-64 activations are lossy, so prefill can be held on A16 with NINFER_A16_PREFILL=1
-// (read once per process) for quality A/B against the same binary.
+// EngineOptions::prefill_activations, applied by Package::plan_load before any layout is sized.
+// INT8 group-64 activations are lossy, so NINFER_A16_PREFILL=1 (read once per process) forces A16
+// whatever the option says, for a quality A/B against the same binary.
+std::atomic<bool> g_int8_prefill{false};
+
 bool a16_prefill_forced() {
-    static const bool forced = [] {
+    static const bool env_forced = [] {
         const char* value = std::getenv("NINFER_A16_PREFILL");
         return value != nullptr && value[0] == '1';
     }();
-    return forced;
+    return env_forced || !g_int8_prefill.load(std::memory_order_relaxed);
 }
 
 ops::LinearPolicy groupwise_policy(qwen3_6::TextPhase phase) {
@@ -546,6 +550,10 @@ std::size_t Variant::mtp_post_mixer_workspace_capacity_bytes(std::int32_t first,
     (void)layout.alloc(DType::BF16, {TextConfig::intermediate, last});
     (void)layout.alloc(DType::BF16, {TextConfig::hidden, last});
     return layout.peak_bytes(1);
+}
+
+void set_prefill_activations(PrefillActivations value) noexcept {
+    g_int8_prefill.store(value == PrefillActivations::Int8, std::memory_order_relaxed);
 }
 
 } // namespace ninfer::targets::qwen3_6_27b::detail

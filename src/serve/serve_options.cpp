@@ -86,6 +86,7 @@ std::string serve_usage_text(const char* argv0) {
            "[--request-log-jsonl FILE] [--slot-save-path DIR] [--auto-save-evicted] "
            "[--response-store-max-records N] [--response-store-max-mib N] "
            "[--kv-dtype bf16|int8|fp8|nvfp4|k8v4|rk8v4|rk4v4|rk4v4-e8|rk2v4-e8] "
+           "[--prefill-activations a16|int8] "
            "[--spec mtp|dflash|dflash2 --draft-tokens N] "
            "[--default-max-tokens N] [--default-thinking-budget N] "
            "[--vision] [--vision-max-tokens N] [--no-cuda-graph] [--no-prefix-reuse] "
@@ -305,6 +306,15 @@ ServeOptions parse_serve_options(int argc, char** argv) {
             options.device = parse_nonnegative_int(require_value("--device"), "device");
         } else if (arg == "--kv-dtype") {
             options.kv_cache = parse_kv_dtype(require_value("--kv-dtype"));
+        } else if (arg == "--prefill-activations") {
+            const std::string value = require_value("--prefill-activations");
+            if (value == "a16") {
+                options.prefill_activations = PrefillActivations::A16;
+            } else if (value == "int8") {
+                options.prefill_activations = PrefillActivations::Int8;
+            } else {
+                throw std::invalid_argument("invalid prefill-activations: " + value);
+            }
         } else if (arg == "--spec") {
             options.speculative.backend =
                 product::parse_speculative_backend(require_value("--spec"));

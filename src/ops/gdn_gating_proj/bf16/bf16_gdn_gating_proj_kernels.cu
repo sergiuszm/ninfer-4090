@@ -340,7 +340,11 @@ bool launch_bf16_prefill_mma(Bf16GdnGatingTokenVariant variant, const Tensor& x,
         constexpr std::int64_t kCtasPerTokenTile =
             static_cast<std::int64_t>(Geometry::kHeads / kBf16GdnBlockM) * SplitK;
         // Cooperative grids must fit concurrently on the active device. Register
-        // allocation differs between SM89 and SM120, and between full/tail kernels.
+        // allocation differs between SM89 and SM120, and between full/tail kernels, so the
+        // residency is the driver's occupancy answer rather than a constant (the old constant 2
+        // for the 27B split-4/2 kernels was one CTA per SM on Ada). The answer is fixed for a
+        // kernel instance, so it is queried once per instance, like the attribute above, not
+        // twice per launch.
         const auto resident_blocks = [&](auto full_tokens) {
             constexpr bool FullTokens = decltype(full_tokens)::value;
             auto kernel = bf16_gdn_gating_proj_gemm_mma_kernel<Geometry, SplitK, FullTokens, Warps,
@@ -352,7 +356,7 @@ bool launch_bf16_prefill_mma(Bf16GdnGatingTokenVariant variant, const Tensor& x,
                                                                      kSmemBytes));
             return blocks;
         };
-        const int resident_per_sm =
+        static const int resident_per_sm =
             std::min(resident_blocks(std::true_type{}), resident_blocks(std::false_type{}));
         const std::int64_t resident_ctas =
             static_cast<std::int64_t>(multiprocessor_count) * resident_per_sm;

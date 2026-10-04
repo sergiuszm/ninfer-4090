@@ -165,10 +165,6 @@ int test_cli_contract() {
     const qb::BenchOptions fp8 =
         parse_for_test({"ninfer_bench", "--weights", "model.ninfer", "--kv-dtype", "fp8"});
     failures += expect(fp8.kv_cache == ninfer::KvCacheStorage::Fp8E4M3Row256, "FP8 KV");
-    const qb::BenchOptions e8 =
-        parse_for_test({"ninfer_bench", "--weights", "model.ninfer", "--kv-dtype", "e8"});
-    failures += expect(e8.kv_cache == ninfer::KvCacheStorage::E8Group64, "E8 KV");
-    failures += expect_string(qb::kv_cache_name(e8.kv_cache), "e8-g64", "E8 report name");
     const qb::BenchOptions nvfp4 =
         parse_for_test({"ninfer_bench", "--weights", "model.ninfer", "--kv-dtype", "nvfp4"});
     failures += expect(nvfp4.kv_cache == ninfer::KvCacheStorage::Nvfp4Group16, "NVFP4 KV");

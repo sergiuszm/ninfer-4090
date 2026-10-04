@@ -265,6 +265,7 @@ GenerationService::GenerationService(ServeOptions options, StartupObserver start
         };
     }
     engine_options.kv_cache                 = options_.kv_cache;
+    engine_options.prefill_activations      = options_.prefill_activations;
     engine_options.enable_vision            = options_.enable_vision;
     engine_options.vision_max_tokens        = options_.vision_max_tokens;
     engine_options.use_cuda_graph           = options_.use_cuda_graph;

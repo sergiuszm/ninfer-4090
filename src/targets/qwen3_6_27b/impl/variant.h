@@ -14,6 +14,10 @@ namespace ninfer::targets::qwen3_6_27b::detail {
 
 using GraphExecutionProfile = qwen3_6::GraphExecutionProfile;
 
+// EngineOptions::prefill_activations for this process (the groupwise dense body's prefill
+// precision); Package::plan_load applies it before any layout is sized. NINFER_A16_PREFILL=1 wins.
+void set_prefill_activations(PrefillActivations value) noexcept;
+
 // Compile-time data and the three closed execution leaves supplied to the Qwen3.6 family runtime.
 // It owns no request state, execution phase, graph object, or schedule callback.
 struct Variant {

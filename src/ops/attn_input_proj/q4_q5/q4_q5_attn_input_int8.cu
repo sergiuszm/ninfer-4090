@@ -1,4 +1,5 @@
-// Adapted from tensorninja/ninfer-4090 (Apache-2.0); see docs/ada.md for provenance.
+// Adapted from tensorninja/ninfer-4090 and soohl/ninfer (both Apache-2.0):
+// the group-64 INT8 activation prefill.
 
 #include "ops/attn_input_proj/q4_q5/q4_q5_attn_input_kernels.h"
 

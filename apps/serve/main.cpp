@@ -4,6 +4,7 @@
 #include "serve/http_server.h"
 #include "serve/serve_options.h"
 
+#include <cstdlib>
 #include <spdlog/logger.h>
 
 #include <array>
@@ -105,6 +106,14 @@ void log_engine_capacity(const std::shared_ptr<spdlog::logger>& logger,
         memory.runtime_reservation_bytes, memory.available_after_weights_bytes,
         memory.available_after_startup_bytes, memory.kv_capacity_headroom_bytes,
         memory.planned_slack_bytes, memory.cuda_graph_allowance_bytes);
+    // --prefill-activations; the environment override wins silently, so the line says when it does
+    const char* forced_a16 = std::getenv("NINFER_A16_PREFILL");
+    const bool env_a16     = forced_a16 != nullptr && forced_a16[0] == '1';
+    logger->info("engine prefill_activations={}{}",
+                 env_a16 ? "a16" : ninfer::prefill_activations_name(engine.prefill_activations),
+                 env_a16 && engine.prefill_activations != ninfer::PrefillActivations::A16
+                     ? " (NINFER_A16_PREFILL=1 overrides the flag)"
+                     : "");
     logger->info("engine context_cache enabled={} active_lanes={} device_state_slots={} "
                  "host_state_slots={} host_kv_bytes={} private_continuations={} shared_prefixes={} "
                  "long_anchors_per_continuation={} auto_long_anchors={}",

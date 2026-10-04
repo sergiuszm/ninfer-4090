@@ -144,6 +144,18 @@ int main() {
     failures += check(defaults.kv_cache == ninfer::KvCacheStorage::BFloat16,
                       "rk8v4 unexpectedly changed the default KV storage");
 
+    failures += check(defaults.prefill_activations == ninfer::PrefillActivations::A16,
+                      "prefill activations do not default to a16");
+    const ServeOptions int8_prefill =
+        parse({"ninfer-serve", "model.ninfer", "--prefill-activations", "int8"});
+    failures += check(int8_prefill.prefill_activations == ninfer::PrefillActivations::Int8,
+                      "--prefill-activations int8 was not selected");
+    bool rejected = false;
+    try {
+        (void)parse({"ninfer-serve", "model.ninfer", "--prefill-activations", "fp8"});
+    } catch (const std::invalid_argument&) { rejected = true; }
+    failures += check(rejected, "--prefill-activations accepted an unknown value");
+
     const ServeOptions k4e8 =
         parse({"ninfer-serve", "model.ninfer", "--kv-dtype", "rk4v4-e8"});
     failures += check(

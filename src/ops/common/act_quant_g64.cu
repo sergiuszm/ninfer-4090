@@ -1,4 +1,5 @@
-// Adapted from tensorninja/ninfer-4090 (Apache-2.0); see docs/ada.md for provenance.
+// Adapted from tensorninja/ninfer-4090 and soohl/ninfer (both Apache-2.0):
+// the group-64 INT8 activation prefill.
 
 #include "ops/common/act_quant_g64.h"
 

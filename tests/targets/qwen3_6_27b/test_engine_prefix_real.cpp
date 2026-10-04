@@ -2750,7 +2750,7 @@ int main() {
             return 1;
         }
         ninfer::EngineOptions configured                = engine_options(qwen38_groupwise);
-        configured.kv_cache                             = ninfer::KvCacheStorage::E8Group64;
+        configured.kv_cache                             = ninfer::KvCacheStorage::RK4V4E8;
         configured.context_cache.device_state_slots     = 0;
         configured.context_cache.host_state_slots       = 2;
         configured.context_cache.host_kv_capacity_bytes = 0;

@@ -27,6 +27,16 @@ inline constexpr std::size_t kDefaultMediaLiveBytes      = 2ULL << 30;
 inline constexpr std::uint32_t kDefaultHostStateSlots    = 8;
 inline constexpr std::size_t kDefaultHostKvCapacityBytes = 8ULL << 30;
 
+// Activation precision of the groupwise Q4/Q5 dense body during prompt prefill. A16 keeps BF16
+// activations (the path before the INT8 prefill port); Int8 quantizes them to group-64 INT8 for
+// faster prefill at a small precision cost. Decode, MTP and DFlash verify are A16 either way.
+// Targets without the INT8 prefill kernels ignore it. Process-wide: the last engine built wins.
+enum class PrefillActivations : std::uint8_t { A16, Int8 };
+
+[[nodiscard]] constexpr const char* prefill_activations_name(PrefillActivations value) noexcept {
+    return value == PrefillActivations::Int8 ? "int8" : "a16";
+}
+
 enum class KvCacheStorage : std::uint8_t {
     BFloat16,
     Int8Group64,
@@ -188,6 +198,8 @@ struct EngineOptions {
     // Optional observer for auto-save outcomes; called on the writer thread.
     std::function<void(const SlotAutoSaveEvent&)> auto_save_listener;
     KvCacheStorage kv_cache       = KvCacheStorage::BFloat16;
+    // NINFER_A16_PREFILL=1 in the environment still forces A16 (a quality A/B on one binary).
+    PrefillActivations prefill_activations = PrefillActivations::A16;
     SpeculativeOptions speculative;
     std::size_t media_cache_bytes = kDefaultMediaCacheBytes;
     std::size_t media_live_bytes  = kDefaultMediaLiveBytes;
