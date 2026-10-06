@@ -251,6 +251,55 @@ tokens) returned 200 with the correct count; one 3200x3200 image (10,000 tokens)
 remaining wall is the 32768 aggregate, about 39 such screenshots or 8 images at pi's
 2000x2000 resize cap in one conversation.
 
+## Community triage 2026-10-06, round 3 (PRs #14, #15)
+
+T-Crypt answered both round-2 reviews on 2026-10-04. A magnus GPU window ran both gates on
+2026-10-06 (20:11 to 20:50 UTC). Each PR was tested merged onto the tip `f4c67501`. Reviews,
+gate scripts and evidence are in `ninfer-recon-notes/triage-20261004/round3/`.
+
+| Item | Verdict | Notes |
+|---|---|---|
+| PR #15 INT8 group-64 activation prefill | MERGED (`7a507d1f`..`8adf1797`, rebase), default `a16` | Every gate line passes, see below. Production INT8 needs a deploy of this tip with `--prefill-activations int8` |
+| PR #14 `--tolerant-tool-calls` | CHANGES REQUESTED | Round-2 items are fixed, see below. One new P1 from real model output: a complete call whose file content quotes the closing tags is recovered as a truncated file |
+
+### PR #15 gate v3
+
+- The round-2 "gating norm +8 to +10%" finding was our measurement error. The v2 gate ran the
+  base binary first in the norm block, and the first run of a bench block is an outlier. The v3
+  gate alternates base, PR, base, PR in both cache modes. Base run 2, PR run 1 and PR run 2 agree
+  to 0.1 us at every T. No 27B gating MMA instance has `NormalizeInput`, and the 27B norm op is
+  the fused SIMT kernel or rmsnorm plus the split kernels of `--op control`. Rule for later kernel
+  A/B benches: alternate the binaries and report the first run of a block separately.
+- Register counts of the 27B gating kernels on sm_89 (cuobjdump): split-1 82, split-2 and split-4
+  (16 warps) 74, split-8 (8 warps) 65. Full and Predicated are equal. These match T-Crypt's log.
+- `ninfer-perplexity --prefill-activations`: quick set A16 4.3429, INT8 4.3446 (+0.039% overall,
+  worst domain +0.082%). INT8 scoring takes 142 s, A16 248 s.
+- `prefix_real` with `NINFER_PREFIX_REAL_PREFILL_ACTIVATIONS=int8`: default, `e8-host-replay` and
+  `automatic-private-anchors` pass. An invalid value aborts.
+- Serve, production flags plus `--no-prefix-reuse`: the PR default is within 0.1% of base at
+  6K, 50K and 128K, and greedy decode is byte-identical. INT8 prefill is +73%, +61% and +45%.
+  MTP acceptance over 16 greedy prompts is 0.628 (a16) and 0.632 (int8). The llm-eval tool-use
+  lane is 5/6 in both modes. `server_start` reports the effective mode and the flag, also with
+  the `NINFER_A16_PREFILL=1` override.
+- Open, optional: a `--q4q5-policy` switch on the attention-input and GDN-input benches.
+
+### PR #14 round 3 (`5700b7d9`)
+
+- Harness against `cdb8c102`: malformed openers (`<funtion=`, `<function =`, `<Function=`) fall
+  back to text. The truncation guard works in the decoder. The strict path is byte-identical.
+  Tolerant cost for 1 MB pathological outputs went from 8 to 12 s down to 1 to 2 ms. A 346 KB
+  output of 2,000 real calls takes 5.5 ms (`cdb8c102`: stopped after 10 minutes).
+- GPU gate with a `max_tokens` sweep over prompts that make the model quote tool markup inside
+  `write_file`: with the flag off, 117 of 117 responses are identical to production. In tolerant
+  mode, 109 responses stopped on the length limit and none returned a tool call. A replay of
+  those texts without the guard recovers 26 of them as a truncated `write_file`.
+- P1: the model wrote a complete call whose file content quotes `</parameter>`, `</function>` and
+  `</tool_call>`. Tolerant mode closed the call at the quoted tags (190 of 1,840 characters) and
+  returned the rest as content (`recovered_from=trailing_content`). Strict mode returns text. The
+  review proposes a rule: a `</tool_call>` before the next `<tool_call>` means that the call ends
+  later, unless that text holds only close markers. A prototype of the rule recovers the full
+  file and changes no other harness case.
+
 ## Community triage 2026-10-04 (issue #12, PRs #10, #13, #14, #15)
 
 One new issue and three new PRs arrived after 2026-09-22, and PR #10 had an unreviewed update.
