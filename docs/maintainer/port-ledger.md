@@ -259,7 +259,7 @@ gate scripts and evidence are in `ninfer-recon-notes/triage-20261004/round3/`.
 
 | Item | Verdict | Notes |
 |---|---|---|
-| PR #15 INT8 group-64 activation prefill | MERGED (`7a507d1f`..`8adf1797`, rebase), default `a16` | Every gate line passes, see below. Production INT8 needs a deploy of this tip with `--prefill-activations int8` |
+| PR #15 INT8 group-64 activation prefill | MERGED (`7a507d1f`..`8adf1797`, rebase), default `a16` | Every gate line passes, see below. DEPLOYED 2026-10-06 21:17 UTC as `pr15int8-8adf1797` with `--prefill-activations int8` in the container line: cold 8.3K prefill 3,558 to 3,577 tok/s (a16 about 2,085) |
 | PR #14 `--tolerant-tool-calls` | CHANGES REQUESTED | Round-2 items are fixed, see below. One new P1 from real model output: a complete call whose file content quotes the closing tags is recovered as a truncated file |
 
 ### PR #15 gate v3
