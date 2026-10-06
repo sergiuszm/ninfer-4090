@@ -948,6 +948,48 @@ int test_tolerant_second_review() {
     return failures;
 }
 
+int test_tolerant_quoted_call_end() {
+    const auto contract = contract_for("write_file", Json{{"path", Json{{"type", "string"}}},
+                                                          {"content", Json{{"type", "string"}}}});
+    const std::string body =
+        "# How One of My Tool Calls Ends\nThey end in this exact order:\n\n```\n</parameter>\n"
+        "</function>\n</tool_call>\n```\n\nThe first tag closes the parameter block.";
+    const std::string file_call = "<tool_call>\n<function=write_file>\n<parameter=path>\n"
+                                  "docs/how-calls-end.md\n</parameter>\n<parameter=content>\n" +
+                                  body + "\n</parameter>\n</function>\n</tool_call>";
+    int failures = 0;
+    // A complete call whose file content quotes the three closing tags (real model output): the
+    // quoted end must not cut the file, with the rest going out as trailing content.
+    {
+        const auto parsed = fi::parse_qwen_tool_call_output(file_call, 64, contract, true);
+        failures += check(parsed.is_tool_call_response && parsed.tool_calls.size() == 1 &&
+                              parsed.content.empty(),
+                          "a call quoting its closing tags was split: " + parsed.content);
+        if (parsed.tool_calls.size() == 1) {
+            failures += check(Json::parse(parsed.tool_calls[0].arguments_json).at("content") == body,
+                              "a call quoting its closing tags was truncated");
+        }
+    }
+    // The same when the quoting call is the second of two.
+    {
+        const std::string text = tool_call("write_file", {{"path", "a.md"}, {"content", "a"}}) +
+                                 "\n" + file_call;
+        const auto parsed = fi::parse_qwen_tool_call_output(text, 64, contract, true);
+        failures += check(parsed.tool_calls.size() == 2 && parsed.content.empty() &&
+                              Json::parse(parsed.tool_calls[1].arguments_json).at("content") == body,
+                          "the second call quoting its closing tags was truncated");
+    }
+    // A real call followed by prose that names `</tool_call>` falls back, like strict mode.
+    {
+        const std::string text = tool_call("write_file", {{"path", "a.md"}, {"content", "a"}}) +
+                                 "\nEach call ends with </tool_call>.";
+        const auto parsed = fi::parse_qwen_tool_call_output(text, 64, contract, true);
+        failures += check(!parsed.is_tool_call_response && parsed.content == text,
+                          "prose naming </tool_call> after a call was recovered");
+    }
+    return failures;
+}
+
 int test_tolerant_trailing_details() {
     const auto contract = contract_for("bash", Json{{"command", Json{{"type", "string"}}}});
     const std::string call = tool_call("bash", {{"command", "ls"}});
@@ -998,6 +1040,7 @@ int main() {
     failures += test_tolerant_never_runs_a_quoted_call();
     failures += test_tolerant_trailing_details();
     failures += test_tolerant_second_review();
+    failures += test_tolerant_quoted_call_end();
     if (failures == 0) { std::cout << "ok\n"; }
     return failures == 0 ? 0 : 1;
 }

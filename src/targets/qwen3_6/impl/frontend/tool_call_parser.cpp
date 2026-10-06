@@ -605,6 +605,10 @@ private:
             if (!starts_with_at(text_, after, kToolClose)) {
                 return FallbackReason::MalformedStructure;
             }
+            // A quoted end: the real `</tool_call>` comes later, so try the next candidate.
+            if (closes_later(after + kToolClose.size())) {
+                return FallbackReason::MalformedStructure;
+            }
             pos = at + kFunctionClose.size();
             return FallbackReason::None;
         }
@@ -655,14 +659,29 @@ private:
     // A recovered value must not hold a call or function that it opens but does not close: such a
     // value is a truncated call borrowing the closes of a call quoted inside it. Unbalanced parameter
     // markers are allowed - recovering those is the point of tolerant mode.
+    void collect_markers() const {
+        if (markers_ready_) { return; }
+        tool_opens_      = marker_positions(text_, kToolOpen);
+        tool_closes_     = marker_positions(text_, kToolClose);
+        function_opens_  = marker_positions(text_, kFunctionOpen);
+        function_closes_ = marker_positions(text_, kFunctionClose);
+        markers_ready_   = true;
+    }
+
+    // `end` is just past a candidate call end. True when another `</tool_call>` follows before the
+    // next `<tool_call>` with more than close markers in between: the candidate end was quoted inside
+    // a value (a file documenting how calls end), and accepting it would truncate that value.
+    bool closes_later(std::size_t end) const {
+        collect_markers();
+        const auto next_open   = std::lower_bound(tool_opens_.begin(), tool_opens_.end(), end);
+        const std::size_t limit = next_open == tool_opens_.end() ? text_.size() : *next_open;
+        const auto close       = std::lower_bound(tool_closes_.begin(), tool_closes_.end(), end);
+        if (close == tool_closes_.end() || *close >= limit) { return false; }
+        return !only_close_markers(text_.substr(end, limit - end));
+    }
+
     bool opens_unclosed_call(std::size_t begin, std::size_t end) const {
-        if (!markers_ready_) {
-            tool_opens_     = marker_positions(text_, kToolOpen);
-            tool_closes_    = marker_positions(text_, kToolClose);
-            function_opens_ = marker_positions(text_, kFunctionOpen);
-            function_closes_ = marker_positions(text_, kFunctionClose);
-            markers_ready_  = true;
-        }
+        collect_markers();
         return count_within(tool_opens_, kToolOpen.size(), begin, end) >
                    count_within(tool_closes_, kToolClose.size(), begin, end) ||
                count_within(function_opens_, kFunctionOpen.size(), begin, end) >
