@@ -27,20 +27,25 @@ struct RouteSpec {
     Bf16GdnGatingScheduleId schedule;
 };
 
-constexpr std::array<RouteSpec, 6> k27Routes{{
+constexpr std::array<RouteSpec, 5> k27Routes{{
     {{1, 1}, Bf16GdnGatingScheduleId::GemvPairedRows},
     {{2, 8}, Bf16GdnGatingScheduleId::SmallTSplit10},
-    // RTX 5090/170-SM performance policy: as token tiles double, halve SplitK to keep the preferred
-    // full grid near 192 CTAs. The launcher independently enforces actual-device residency.
-    {{9, 1024}, Bf16GdnGatingScheduleId::MmaCooperativeSplit8},
-    {{1025, 2048}, Bf16GdnGatingScheduleId::MmaCooperativeSplit4},
-    {{2049, 4096}, Bf16GdnGatingScheduleId::MmaCooperativeSplit2},
-    {{4097, kAnyCols}, Bf16GdnGatingScheduleId::MmaUnsplit},
+    // sm_89 has 128 SMs. The cuobjdump -res-usage figures on the sm_89 objects match the sm_86
+    // measurements exactly - split8 (256 threads, 65 regs) admits 2 CTAs/SM -> 256 device-wide;
+    // split4/2 (512 threads, 74 regs) admit 1 CTA/SM -> 128 - and sm_89 shares the sm_86
+    // register file, thread, and shared-memory limits per SM, so only the SM count changes.
+    // Grid is ceil(T/128)*3*SplitK, so split8 is legal to T<=1280 and split2 to T<=2688. Split4
+    // reaches the same 1280 ceiling as split8 while doing less work per launch, so it is
+    // unreachable on this target.
+    {{9, 1280}, Bf16GdnGatingScheduleId::MmaCooperativeSplit8},
+    {{1281, 2688}, Bf16GdnGatingScheduleId::MmaCooperativeSplit2},
+    {{2689, kAnyCols}, Bf16GdnGatingScheduleId::MmaUnsplit},
 }};
 
 constexpr std::array<RouteSpec, 5> k35Routes{{
-    // RTX 5090/170-SM performance policy: this progression keeps the preferred full grid near
-    // 256 CTAs. The launcher independently enforces actual-device residency.
+    // Same progression. Grid is ceil(T/64)*2*SplitK; the sm_89 budgets (512 CTAs for split16,
+    // 384 for split8/4/2) make the upstream perf-chosen bounds of 1024 / 2048 / 4096 legal again
+    // on this target, so they are restored unchanged.
     {{1, 127}, Bf16GdnGatingScheduleId::MmaCooperativeSplit16},
     {{128, 1024}, Bf16GdnGatingScheduleId::MmaCooperativeSplit8},
     {{1025, 2048}, Bf16GdnGatingScheduleId::MmaCooperativeSplit4},
@@ -61,6 +66,62 @@ constexpr bool catalog_is_closed(const std::array<RouteSpec, N>& routes,
 
 static_assert(catalog_is_closed(k27Routes, kAnyCols));
 static_assert(catalog_is_closed(k35Routes, kAnyCols));
+
+// Device-wide resident-CTA budgets for the sm_89 build: the per-SM occupancy measured on sm_86
+// carries over unchanged (identical register counts and per-SM limits), scaled from 82 to the
+// RTX 4090's 128 SMs. These are the single source of truth: both the runtime residency
+// predicates and the compile-time catalog guard below read them, so a retuned constant cannot
+// silently disagree with the route table it is meant to bound.
+constexpr std::int32_t resident_ctas_27(Bf16GdnGatingScheduleId schedule) noexcept {
+    return schedule == Bf16GdnGatingScheduleId::MmaCooperativeSplit8 ? 256 : 128;
+}
+
+constexpr std::int32_t resident_ctas_35(Bf16GdnGatingScheduleId schedule) noexcept {
+    if (schedule == Bf16GdnGatingScheduleId::MmaCooperativeSplit32) { return 256; }
+    if (schedule == Bf16GdnGatingScheduleId::MmaCooperativeSplit16) { return 512; }
+    return 384;
+}
+
+// Zero marks a schedule that is not launched cooperatively and therefore carries no residency
+// constraint at all.
+constexpr std::int32_t cooperative_split_k(Bf16GdnGatingScheduleId schedule) noexcept {
+    switch (schedule) {
+    case Bf16GdnGatingScheduleId::MmaCooperativeSplit32:
+        return 32;
+    case Bf16GdnGatingScheduleId::MmaCooperativeSplit16:
+        return 16;
+    case Bf16GdnGatingScheduleId::MmaCooperativeSplit8:
+        return 8;
+    case Bf16GdnGatingScheduleId::MmaCooperativeSplit4:
+        return 4;
+    case Bf16GdnGatingScheduleId::MmaCooperativeSplit2:
+        return 2;
+    default:
+        return 0;
+    }
+}
+
+// A cooperative launch requires the entire grid to be simultaneously resident. A route whose upper
+// bound exceeds the budget is not merely slow: the driver rejects the launch outright with
+// cudaErrorCooperativeLaunchTooLarge on the first prefill wide enough to reach it. Checking the
+// catalog at compile time turns that class of regression into a build failure.
+template <std::size_t N, typename Budget>
+constexpr bool catalog_is_resident(const std::array<RouteSpec, N>& routes, std::int32_t tile_cols,
+                                   std::int32_t row_tiles, Budget budget) noexcept {
+    for (const RouteSpec& route : routes) {
+        const std::int32_t split_k = cooperative_split_k(route.schedule);
+        if (split_k == 0) { continue; }
+        const std::int64_t column_tiles =
+            (static_cast<std::int64_t>(route.cols.last) + tile_cols - 1) / tile_cols;
+        if (column_tiles * row_tiles * split_k > budget(route.schedule)) { return false; }
+    }
+    return true;
+}
+
+static_assert(catalog_is_resident(k27Routes, 128, 3, resident_ctas_27),
+              "a 27B cooperative route exceeds the sm_89 resident-CTA budget at its upper bound");
+static_assert(catalog_is_resident(k35Routes, 64, 2, resident_ctas_35),
+              "a 35B cooperative route exceeds the sm_89 resident-CTA budget at its upper bound");
 
 bool is_27(const Bf16GdnGatingProblem& problem) noexcept {
     return problem.heads == 48 && problem.input_rows == 5120;

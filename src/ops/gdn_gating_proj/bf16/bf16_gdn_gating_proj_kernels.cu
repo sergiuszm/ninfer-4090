@@ -257,23 +257,6 @@ void require_shape35(const Weight& w, const char* name) {
     }
 }
 
-template <class Geometry, int SplitK>
-constexpr std::int32_t cooperative_resident_ctas_per_sm() noexcept {
-    static_assert(SplitK > 1);
-    if constexpr (std::is_same_v<Geometry, Bf16Gdn27Geometry>) {
-        static_assert(SplitK == 8 || SplitK == 4 || SplitK == 2);
-        // Qualified on the sm_120a build: BN128 split-8 uses 256 threads and split-4/2 use
-        // 512 threads; registers and 40-KiB shared memory admit two resident CTAs per SM.
-        return 2;
-    } else {
-        static_assert(std::is_same_v<Geometry, Bf16Gdn35Geometry>);
-        static_assert(SplitK == 32 || SplitK == 16 || SplitK == 8 || SplitK == 4 || SplitK == 2);
-        // BN64 split-32 is register-limited to two resident CTAs per SM. The remaining
-        // specializations admit four. These are kernel facts, not a device-wide SM-count policy.
-        return SplitK == 32 ? 2 : 4;
-    }
-}
-
 template <class Geometry, int SplitK, int Warps = kBf16GdnWarps, bool NormalizeInput = false,
           int NormTokenCapacity = 0>
 bool launch_bf16_prefill_mma(Bf16GdnGatingTokenVariant variant, const Tensor& x,
@@ -357,25 +340,53 @@ bool launch_bf16_prefill_mma(Bf16GdnGatingTokenVariant variant, const Tensor& x,
     } else {
         constexpr std::int64_t kCtasPerTokenTile =
             static_cast<std::int64_t>(Geometry::kHeads / kBf16GdnBlockM) * SplitK;
-        constexpr std::int32_t kResidentCtasPerSm =
-            cooperative_resident_ctas_per_sm<Geometry, SplitK>();
-        const std::int64_t resident_ctas =
-            static_cast<std::int64_t>(multiprocessor_count) * kResidentCtasPerSm;
-        const std::int64_t max_token_tiles = resident_ctas / kCtasPerTokenTile;
-        if (max_token_tiles < 1) { return false; }
+        // Cooperative grids must fit concurrently on the active device. Register
+        // allocation differs between SM89 and SM120, and between full/tail kernels, so the
+        // residency is the driver's occupancy answer rather than a constant (the old constant 2
+        // for the 27B split-4/2 kernels was one CTA per SM on Ada). The answer is fixed for a
+        // kernel instance, so it is queried once per instance, like the attribute above, not
+        // twice per launch. Full and Predicated are separate instances with their own register
+        // counts, so each launch is sized by the residency of the variant it runs.
+        const auto resident_tiles = [&](auto full_tokens) -> std::int64_t {
+            constexpr bool FullTokens = decltype(full_tokens)::value;
+            static const int resident_per_sm = [] {
+                auto kernel =
+                    bf16_gdn_gating_proj_gemm_mma_kernel<Geometry, SplitK, FullTokens, Warps,
+                                                         NormalizeInput, NormTokenCapacity>;
+                CUDA_CHECK(cudaFuncSetAttribute(
+                    kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, kSmemBytes));
+                int blocks = 0;
+                CUDA_CHECK(cudaOccupancyMaxActiveBlocksPerMultiprocessor(&blocks, kernel,
+                                                                         Warps * 32, kSmemBytes));
+                return blocks;
+            }();
+            return static_cast<std::int64_t>(multiprocessor_count) * resident_per_sm /
+                   kCtasPerTokenTile;
+        };
+        const std::int64_t full_tiles      = resident_tiles(std::true_type{});
+        const std::int64_t predicated_tiles = resident_tiles(std::false_type{});
+        const std::int64_t variant_tiles =
+            variant == Bf16GdnGatingTokenVariant::Full ? full_tiles : predicated_tiles;
+        if (std::min(full_tiles, predicated_tiles) < 1) { return false; }
 
         const std::int32_t t = x.ne[1];
         const std::int64_t total_token_tiles =
             div_up(static_cast<std::int64_t>(t), static_cast<std::int64_t>(kBlockN));
-        if (total_token_tiles <= max_token_tiles) {
+        if (total_token_tiles <= variant_tiles) {
             launch_problem(variant, x, normalized_x, g, beta);
         } else {
             // Token tiles have no cross-tile reduction. Rebase each tensor to a disjoint token
-            // interval and reuse the call-scoped partial workspace in stream order.
-            const std::int64_t launch_token_capacity = max_token_tiles * kBlockN;
+            // interval and reuse the call-scoped partial workspace in stream order. Whole tiles
+            // launch Full at its residency; a remainder that ends in a partial tile launches
+            // Predicated once it fits that variant's residency.
             for (std::int32_t token_begin = 0; token_begin < t;) {
-                const std::int32_t launch_t = static_cast<std::int32_t>(std::min<std::int64_t>(
-                    static_cast<std::int64_t>(t) - token_begin, launch_token_capacity));
+                const std::int64_t remaining = static_cast<std::int64_t>(t) - token_begin;
+                const std::int64_t whole     = remaining / kBlockN * kBlockN;
+                const std::int32_t launch_t = static_cast<std::int32_t>(
+                    remaining % kBlockN != 0 && div_up(remaining, std::int64_t{kBlockN}) <=
+                                                    predicated_tiles
+                        ? remaining
+                        : std::min(whole, full_tiles * kBlockN));
                 Tensor launch_x             = x.slice(1, token_begin, launch_t);
                 Tensor launch_g             = g.slice(1, token_begin, launch_t);
                 Tensor launch_beta          = beta.slice(1, token_begin, launch_t);
