@@ -1,14 +1,14 @@
 cmake_minimum_required(VERSION 3.28)
 
-# The current implementation is compiled only for sm_120a. Set and validate the
+# This fork (rtx4090-port) is compiled only for sm_89. Set and validate the
 # architecture before CUDA compiler detection so CMake never injects a generic
 # host-toolchain default or accepts an unsupported target.
 if(NOT DEFINED CMAKE_CUDA_ARCHITECTURES)
-  set(CMAKE_CUDA_ARCHITECTURES 120a CACHE STRING "CUDA architectures to build")
+  set(CMAKE_CUDA_ARCHITECTURES 89 CACHE STRING "CUDA architectures to build")
 endif()
-if(NOT CMAKE_CUDA_ARCHITECTURES STREQUAL "120a")
+if(NOT CMAKE_CUDA_ARCHITECTURES STREQUAL "89")
   message(FATAL_ERROR
-    "NInfer supports only CMAKE_CUDA_ARCHITECTURES=120a; got "
+    "NInfer-4090 supports only CMAKE_CUDA_ARCHITECTURES=89; got "
     "'${CMAKE_CUDA_ARCHITECTURES}'")
 endif()
 
@@ -24,6 +24,9 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CUDA_STANDARD 20)
 set(CMAKE_CUDA_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)        # clangd / IDE tooling
+# Every target sees the sm_89 switch: kernels (PDL off, TMA routes on cp.async), model startup
+# (compute capability 8.9, no NVFP4/K8V4 KV), weight policies (A16 only) and tests.
+add_compile_definitions(NINFER_SM86=1)
 if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE Release)
 endif()
