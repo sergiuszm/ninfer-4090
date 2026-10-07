@@ -48,6 +48,17 @@ __device__ __forceinline__ void mma_f16(float& c0, float& c1, float& c2, float& 
                  : "r"(a0), "r"(a1), "r"(a2), "r"(a3), "r"(b0), "r"(b1));
 }
 
+// FP16-accumulate variant: full-rate on consumer parts where f32-acc HMMA runs at
+// half rate. D/C are two packed half2 registers: c0 = rows 0-7 column pair,
+// c1 = rows 8-15 column pair of the same fragment the f32 variant returns in c0..c3.
+__device__ __forceinline__ void mma_f16_f16acc(unsigned& c0, unsigned& c1, unsigned a0, unsigned a1,
+                                               unsigned a2, unsigned a3, unsigned b0, unsigned b1) {
+    asm volatile("mma.sync.aligned.m16n8k16.row.col.f16.f16.f16.f16 "
+                 "{%0,%1}, {%2,%3,%4,%5}, {%6,%7}, {%0,%1};\n"
+                 : "+r"(c0), "+r"(c1)
+                 : "r"(a0), "r"(a1), "r"(a2), "r"(a3), "r"(b0), "r"(b1));
+}
+
 __device__ __forceinline__ void mma_s8(int& c0, int& c1, int& c2, int& c3, unsigned a0, unsigned a1,
                                        unsigned a2, unsigned a3, unsigned b0, unsigned b1) {
     asm volatile("mma.sync.aligned.m16n8k32.row.col.s32.s8.s8.s32 "
@@ -62,6 +73,7 @@ __device__ __forceinline__ void mma_s8(int& c0, int& c1, int& c2, int& c3, unsig
 __device__ __forceinline__ void mma_fp8_e4m3(float& c0, float& c1, float& c2, float& c3,
                                              unsigned a0, unsigned a1, unsigned a2, unsigned a3,
                                              unsigned b0, unsigned b1) {
+#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 1200
     constexpr unsigned kUnitScale8          = 0x7Fu;
     constexpr unsigned short kScaleBlockId  = 0;
     constexpr unsigned short kScaleThreadId = 0;
@@ -73,6 +85,14 @@ __device__ __forceinline__ void mma_fp8_e4m3(float& c0, float& c1, float& c2, fl
                  : "r"(a0), "r"(a1), "r"(a2), "r"(a3), "r"(b0), "r"(b1), "r"(kUnitScale8),
                    "h"(kScaleBlockId), "h"(kScaleThreadId), "r"(kUnitScale8), "h"(kScaleBlockId),
                    "h"(kScaleThreadId));
+#else
+    // Fork-local: the .kind:: block-scale form needs sm_120a. sm_89 assembles the plain e4m3
+    // form, which equals the unit-scale (UE8M0 0x7f) result above.
+    asm volatile("mma.sync.aligned.m16n8k32.row.col.f32.e4m3.e4m3.f32 "
+                 "{%0,%1,%2,%3}, {%4,%5,%6,%7}, {%8,%9}, {%0,%1,%2,%3};\n"
+                 : "+f"(c0), "+f"(c1), "+f"(c2), "+f"(c3)
+                 : "r"(a0), "r"(a1), "r"(a2), "r"(a3), "r"(b0), "r"(b1));
+#endif
 }
 
 __device__ __forceinline__ void mma_tf32_bits(float& c0, float& c1, float& c2, float& c3,
@@ -94,6 +114,12 @@ __device__ __forceinline__ void mma_nvfp4_e4m3(float& c0, float& c1, float& c2, 
                                                unsigned a0, unsigned a1, unsigned a2, unsigned a3,
                                                unsigned b0, unsigned b1, unsigned sfa,
                                                unsigned sfb) {
+#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ < 1200
+    // Fork-local: E2M1 block-scale MMA needs sm_120a. sm_89 binds NVFP4 weights as A16.
+    (void)c0, (void)c1, (void)c2, (void)c3, (void)a0, (void)a1, (void)a2, (void)a3;
+    (void)b0, (void)b1, (void)sfa, (void)sfb;
+    __trap();
+#else
     constexpr unsigned short kScaleBlockId  = 0;
     constexpr unsigned short kScaleThreadId = 0;
     asm volatile("mma.sync.aligned.kind::mxf4nvf4.block_scale.scale_vec::4X."
@@ -110,6 +136,7 @@ __device__ __forceinline__ void mma_nvfp4_e4m3(float& c0, float& c1, float& c2, 
                  : "r"(a0), "r"(a1), "r"(a2), "r"(a3), "r"(b0), "r"(b1), "r"(sfa),
                    "h"(kScaleBlockId), "h"(kScaleThreadId), "r"(sfb), "h"(kScaleBlockId),
                    "h"(kScaleThreadId));
+#endif
 }
 
 } // namespace ninfer::ops
