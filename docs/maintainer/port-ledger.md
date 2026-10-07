@@ -251,6 +251,54 @@ tokens) returned 200 with the correct count; one 3200x3200 image (10,000 tokens)
 remaining wall is the 32768 aggregate, about 39 such screenshots or 8 images at pi's
 2000x2000 resize cap in one conversation.
 
+## Upstream catch-up #4 (in progress): `neroued/master` `81c8ce09`
+
+Started 2026-10-07 on branch `catchup4`. The branch starts at upstream `81c8ce09` (`master` and
+`dev` are the same commit) and carries the fork onto it. A merge into `rtx4090-port` is not
+practical: upstream replaced the context cache (`b9114396`), moved the model code to
+`src/models/qwen3_5` and split the CMake files per component. A trial merge of `fdb7a6cf` gave 95
+conflicted paths. `rtx4090-port` stays the branch of record and the production source until the
+catch-up deploys. Plan, stage gates and the remap of every fork feature:
+`ninfer-recon-notes/CATCHUP-20261007.md`.
+
+Decisions (2026-10-07):
+
+- Slot persistence: DROP. A read-only `GET /slots` stays for the fleet dashboard, without the
+  `session_digest` key. Explicit save and restore is decided after one week of production on the
+  new cache.
+- PR #14 tolerant tool calls: carried, active only on the unconstrained tool-call route.
+- R4 automatic long anchors: DROP.
+- Upstream tool constraints on by default: decided after the stage 4 gate.
+
+File map: `docs/maintainer/catchup-4-filemap.tsv` lists the 207 non-docs files that the fork
+changed since `d4929686`. The columns are the file status at `81c8ce09`, the upstream path, the
+disposition and the fork commits that changed the file. A disposition is a stage number with the
+feature ids of the plan, `carried <commit>`, or `DROP`. Each stage updates its rows when it lands.
+
+Stage 0 (carry, 2026-10-07):
+
+| Item | Commits | Notes |
+|---|---|---|
+| B3 PDL off under `NINFER_SM86` | `c44ad21c` | The global `NINFER_SM86` definition comes with stage 1 |
+| B6 Docker compat libraries, `.gitignore` | `f1ba3f1b` | The fork `models/` entry is now `/scripts/models/`. Unanchored, it also matched upstream's `src/models/`, `tests/models/` and `bench/models/` and hid new files there |
+| B7 scripts, `VERSION` | `585e4ec1`, `6c7329fc` | Downloads pin the v3 revisions: Qwen3.8-27B `1cbd84e7221e`, Qwen3.6-35B-A3B `ee4495803bc4`. Both hashes match upstream's model cards |
+| K4 GDN gating projection | `4974d824`, `ee1e167f` | 3-way merges are clean |
+| K5 GDN recurrent | `16836931` | |
+| K1 E8 codecs and testbeds | `0503ab32` | Headers, codec test and oracle only. See the finding below |
+| T3 bench drivers | `a381dbe4` | |
+| Fork-only docs | `c692438f` | Not carried: `docs/turn-checkpoint-ring.md` (retired feature and R4) |
+
+Finding for stage 2: K1 is not MECHANICAL as the remap says. The fork append kernel stores
+`Int8Group64` keys unrotated, and the fork attention reads them that way. Upstream rotates the keys
+with the d256 Hadamard (`17a7275f`), and upstream's `int8/` attention expects rotated keys.
+Catch-up #3 kept the fork form (see the `causal_cache.cpp` oracle row there). K2 option A keeps
+upstream's `int8/` unchanged. The fork modes then need their own append path, and the
+unrotated-K hunk of `tests/ops/test_kv_cache_append.cpp` applies only to that path.
+
+Docs for later stages: fork edits to `README.md`, `docs/cli.md` and `docs/serving.md` wait for
+stage 6, where the flag set is final. `docs/rtx-3090-linux.md` and `docs/rtx-3090-windows.md` still
+name v1 and v2 artifacts. Refresh them at stage 7.
+
 ## Community triage 2026-10-07, round 4 (PR #14)
 
 T-Crypt answered the round-3 P1 with `e7495e6c` on 2026-10-06. The commit implements the rule that
