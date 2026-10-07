@@ -251,6 +251,38 @@ tokens) returned 200 with the correct count; one 3200x3200 image (10,000 tokens)
 remaining wall is the 32768 aggregate, about 39 such screenshots or 8 images at pi's
 2000x2000 resize cap in one conversation.
 
+## Community triage 2026-10-07, round 4 (PR #14)
+
+T-Crypt answered the round-3 P1 with `e7495e6c` on 2026-10-06. The commit implements the rule that
+the round-3 review proposed: a call end is rejected when another `</tool_call>` follows it before
+the next `<tool_call>` with more than close markers between them. It was tested merged onto the tip
+`b015b759`. A magnus GPU window ran on 2026-10-07 (18:28 to 18:51 UTC). Review, gate scripts and
+evidence are in `ninfer-recon-notes/triage-20261004/round4/`.
+
+| Item | Verdict | Notes |
+|---|---|---|
+| PR #14 `--tolerant-tool-calls` | MERGED (`91829c35`..`6d88143b`, rebase), default off | Every gate line passes in a16 and int8 prefill, see below. The rebased tree is identical to the gated merge. Not deployed: with the flag off, the PR changes no response |
+| `docs/serving.md` | FIXED in `64911f31` | The PR did not update the tolerant-mode rules. Our commit documents the new rule, its two fallbacks and the 64-attempt budget |
+
+- Harness: the same result as the round-3 prototype on every case. On the real model outputs of
+  round 3, the quoting `write_file` now recovers the full 1,840 characters (round 3: 190), and the
+  two-call variant is fixed. A call followed by prose that names `</tool_call>` falls back, as in
+  strict mode. Timings are unchanged (2,000 real calls: 6.5 ms). A 1 MB worst case for the new
+  check (close markers, prose only at the end) takes 11.5 ms because the attempt budget bounds the
+  rescans. A value that quotes the closing tags 5,000 times exceeds the budget and falls back; 40
+  times recovers in full.
+- GPU gate, run twice with the round-3 method: a16 prefill (the round-3 configuration) and
+  `--prefill-activations int8` (production since 2026-10-06). Flag off is identical to production
+  in 117 of 117 (a16) and 73 of 73 (int8) responses. In tolerant mode, 109 and 67 responses stopped
+  on the length limit and none returned a tool call. No recovered response left tool markup in
+  its content. The llm-eval tool-use lane is 5/6 with and without the flag in both modes.
+- The a16 base reproduced round 3 byte for byte (117 of 117), so the P1 output came back. Tolerant
+  mode now returns the full file with no content left over. Under int8, the model does not write
+  the real tags for that prompt, so the int8 run is a regression check only.
+- PR #15 got an independent confirmation from gryknight9 on a second 4090 (Docker, 262K,
+  `rk4v4-e8`, MTP 3, tip `b015b759`): cold prefill 1.67x at 5.3K and 1.71x at 10.4K tokens (a16
+  about 2,100 tok/s, int8 about 3,600 tok/s).
+
 ## Community triage 2026-10-06, round 3 (PRs #14, #15)
 
 T-Crypt answered both round-2 reviews on 2026-10-04. A magnus GPU window ran both gates on
@@ -260,7 +292,7 @@ gate scripts and evidence are in `ninfer-recon-notes/triage-20261004/round3/`.
 | Item | Verdict | Notes |
 |---|---|---|
 | PR #15 INT8 group-64 activation prefill | MERGED (`7a507d1f`..`8adf1797`, rebase), default `a16` | Every gate line passes, see below. DEPLOYED 2026-10-06 21:17 UTC as `pr15int8-8adf1797` with `--prefill-activations int8` in the container line: cold 8.3K prefill 3,558 to 3,577 tok/s (a16 about 2,085) |
-| PR #14 `--tolerant-tool-calls` | CHANGES REQUESTED | Round-2 items are fixed, see below. One new P1 from real model output: a complete call whose file content quotes the closing tags is recovered as a truncated file |
+| PR #14 `--tolerant-tool-calls` | CHANGES REQUESTED, merged in round 4 | Round-2 items are fixed, see below. One new P1 from real model output: a complete call whose file content quotes the closing tags is recovered as a truncated file |
 
 ### PR #15 gate v3
 
