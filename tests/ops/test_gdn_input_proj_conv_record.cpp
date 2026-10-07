@@ -360,6 +360,10 @@ int run_nvfp4() {
     int failures   = 0;
     const auto run = [&](std::int32_t width, std::int32_t batch, std::vector<std::int32_t> valid,
                          ops::LinearPolicy policy, std::uint32_t seed) {
+#ifdef NINFER_SM86
+        // sm_89 has no A8 or A4 route; the loader binds NVFP4 weights as A16.
+        if (policy != ops::LinearPolicy::A16Only) { return 0; }
+#endif
         const std::size_t snapshot_bytes =
             ops::gdn_input_proj_conv_snapshot_workspace_capacity_bytes(QType::NVFP4, kRows, kHidden,
                                                                        policy, batch, width, width);
@@ -398,6 +402,10 @@ int run_nvfp4() {
 
 int run_fp8_case(DevicePackedWeight& parent, std::int32_t width, std::int32_t batch,
                  std::vector<std::int32_t> valid, ops::LinearPolicy policy, std::uint32_t seed) {
+#ifdef NINFER_SM86
+    // sm_89 has no A8 or A4 route; the loader binds FP8 and NVFP4 weights as A16.
+    if (policy != ops::LinearPolicy::A16Only) { return 0; }
+#endif
     const std::size_t snapshot_bytes = ops::gdn_input_proj_conv_snapshot_workspace_capacity_bytes(
         QType::FP8_E4M3FN_ROW_BF16, 16384, 5120, policy, batch, width, width);
     const std::size_t record_bytes = ops::gdn_input_proj_conv_record_workspace_capacity_bytes(

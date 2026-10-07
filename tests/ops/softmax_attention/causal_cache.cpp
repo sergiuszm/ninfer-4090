@@ -1766,6 +1766,13 @@ int run_a1_case(DeviceExecutionView execution, const Geometry& geometry, KvCache
                 const AttentionCase& test_case, MappingPattern mapping,
                 std::span<const int> oracle_queries         = {},
                 std::span<const std::uint32_t> graph_limits = {}) {
+#ifdef NINFER_SM86
+    // sm_89 refuses NVFP4 and K8V4 KV at startup (E2M1 pack, TMA).
+    if (storage == KvCacheStorage::Nvfp4Group16 ||
+        storage == KvCacheStorage::Fp8KeyNvfp4Value) {
+        return 0;
+    }
+#endif
     const std::int32_t total       = test_case.base + test_case.tokens;
     const std::int32_t max_context = static_cast<std::int32_t>(
         std::max<std::uint32_t>(static_cast<std::uint32_t>(total + 3), test_case.envelope_max));
@@ -1896,6 +1903,13 @@ int run_a1_case(DeviceExecutionView execution, const Geometry& geometry, KvCache
 int run_a3_case(DeviceExecutionView execution, const Geometry& geometry, KvCacheStorage storage,
                 const AttentionCase& test_case, MappingPattern mapping,
                 std::span<const int> oracle_queries = {}) {
+#ifdef NINFER_SM86
+    // sm_89 refuses NVFP4 and K8V4 KV at startup (E2M1 pack, TMA).
+    if (storage == KvCacheStorage::Nvfp4Group16 ||
+        storage == KvCacheStorage::Fp8KeyNvfp4Value) {
+        return 0;
+    }
+#endif
     const std::int32_t total       = test_case.base + test_case.tokens;
     const std::int32_t max_context = static_cast<std::int32_t>(
         std::max<std::uint32_t>(static_cast<std::uint32_t>(total + 3), test_case.envelope_max));

@@ -66,15 +66,22 @@ int main() {
                                       32,  33,  48,  63,  64,  65,  96,  127, 128,  129,  191,
                                       192, 193, 255, 256, 257, 511, 512, 513, 1023, 1024, 1025};
         int failures = 0;
+#ifndef NINFER_SM86
         failures += check_negative_gate();
+#endif
         failures += run_profile(
             "LinearSwiGLU FP8_A16",
             {QType::FP8_E4M3FN_ROW_BF16, 34816, 5120, 17408, 1811U, ActivationCompute::A16},
             kA16Cases, std::array<std::int32_t, 1>{16});
+#ifdef NINFER_SM86
+        // sm_89 has no A8 route (TMA); the loader binds FP8 weights as A16.
+        (void)kA8Cases;
+#else
         failures += run_profile(
             "LinearSwiGLU FP8_A8",
             {QType::FP8_E4M3FN_ROW_BF16, 34816, 5120, 17408, 1813U, ActivationCompute::A8},
             kA8Cases, std::array{4, 5, 65, 193, 257, 512, 513, 1025});
+#endif
         std::cout << (failures == 0 ? "OK" : "FAIL") << " LinearSwiGLU FP8 correctness\n";
         return failures == 0 ? 0 : 1;
     } catch (const std::exception& error) {

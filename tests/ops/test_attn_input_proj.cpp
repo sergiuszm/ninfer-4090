@@ -65,6 +65,10 @@ WeightView rows(const WeightParent& parent, std::uint64_t begin, std::uint64_t c
 
 int run_target_projection_case(DevicePackedWeight& parent, DevicePackedWeight* gate_value,
                                int tokens, ops::LinearPolicy policy, bool replay = false) {
+#ifdef NINFER_SM86
+    // sm_89 has no A8 or A4 route; the loader binds FP8 and NVFP4 weights as A16.
+    if (policy != ops::LinearPolicy::A16Only) { return 0; }
+#endif
     constexpr int hidden = 5120, qrows = 6144, kvrows = 1024;
     const bool dual      = gate_value != nullptr;
     auto activation      = make_bf16_activation(hidden, tokens, 101U + tokens);
@@ -350,6 +354,10 @@ int run_bf16_target() {
 int run_nvfp4_target_case(DevicePackedWeight& parent, std::int32_t tokens,
                           ops::LinearPolicy policy = ops::LinearPolicy::A16Only,
                           bool omit_divisors       = false) {
+#ifdef NINFER_SM86
+    // sm_89 has no A8 or A4 route; the loader binds FP8 and NVFP4 weights as A16.
+    if (policy != ops::LinearPolicy::A16Only) { return 0; }
+#endif
     constexpr std::int32_t kHidden = 5120;
     constexpr std::int32_t kQRows  = 6144;
     constexpr std::int32_t kKvRows = 1024;

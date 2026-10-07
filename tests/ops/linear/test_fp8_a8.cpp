@@ -217,6 +217,10 @@ int run_fp8_a8() {
 } // namespace
 
 int main() {
+#ifdef NINFER_SM86
+    std::cout << "SKIP: FP8 A8 execution uses TMA, which requires sm_90\n";
+    return 77;
+#endif
     if (!ninfer::test::linear::cuda_available()) {
         std::cout << "SKIP: no usable CUDA device\n";
         return 77;

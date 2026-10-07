@@ -369,6 +369,13 @@ void encode_full_group(const std::vector<float>& source, std::size_t source_base
 }
 
 int full_append_case(int kv_heads, KvCacheStorage storage, int tokens = 3) {
+#ifdef NINFER_SM86
+    // sm_89 refuses NVFP4 and K8V4 KV at startup (cvt.e2m1x2 needs sm_100a+).
+    if (storage == KvCacheStorage::Nvfp4Group16 ||
+        storage == KvCacheStorage::Fp8KeyNvfp4Value) {
+        return 0;
+    }
+#endif
     const TestCacheLayout layout = test_cache_layout(storage);
     const int first_position     = tokens >= 128 ? 61 : 63;
     const int logical_pages      = (first_position + tokens + kPage - 1) / kPage;
@@ -1377,6 +1384,10 @@ int main(int argc, char** argv) {
 
     int failures = 0;
     if (nvfp4_only || k8v4_only) {
+#ifdef NINFER_SM86
+        std::cout << "kv_cache_append: SKIP (NVFP4 KV-cache storage requires an sm_120a GPU)\n";
+        return 77;
+#endif
         const KvCacheStorage storage =
             nvfp4_only ? KvCacheStorage::Nvfp4Group16 : KvCacheStorage::Fp8KeyNvfp4Value;
         for (const int kv_heads : {4, 2}) { failures += full_append_case(kv_heads, storage); }

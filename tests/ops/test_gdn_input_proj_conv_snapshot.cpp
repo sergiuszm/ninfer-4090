@@ -837,6 +837,10 @@ int run_q8() {
 
 int run_nvfp4_case(DevicePackedWeight& parent, std::int32_t tokens, ops::LinearPolicy policy,
                    std::int32_t initial_slot) {
+#ifdef NINFER_SM86
+    // sm_89 has no A8 or A4 route; the loader binds FP8 and NVFP4 weights as A16.
+    if (policy != ops::LinearPolicy::A16Only) { return 0; }
+#endif
     constexpr std::int32_t kHidden           = 5120;
     constexpr std::int32_t kValueRows        = 6144;
     constexpr std::int32_t kZRows            = 6144;
@@ -978,6 +982,10 @@ int run_nvfp4() {
 int run_fp8_case(DevicePackedWeight& parent, std::int32_t tokens, ops::LinearPolicy policy,
                  std::int32_t initial_slot, bool convenience = false,
                  bool shared_state_selectors = false) {
+#ifdef NINFER_SM86
+    // sm_89 has no A8 or A4 route; the loader binds FP8 and NVFP4 weights as A16.
+    if (policy != ops::LinearPolicy::A16Only) { return 0; }
+#endif
     constexpr std::int32_t kHidden               = 5120;
     constexpr std::int32_t kValueRows            = 6144;
     constexpr std::int32_t kZRows                = 6144;
