@@ -76,11 +76,16 @@ inline CUtensorMap fp8_tma_map(const std::uint8_t* pointer, int rows, int k, int
 
 __device__ __forceinline__ void fp8_tma_load(void* destination, const CUtensorMap* map, int k,
                                              int row, std::uint64_t* barrier) {
+#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ < 900
+    // Fork-local: TMA needs sm_90. sm_89 builds bind FP8 weights as A16 and never launch A8 TMA.
+    __trap();
+#else
     asm volatile("cp.async.bulk.tensor.2d.shared::cta.global.tile.mbarrier::complete_tx::bytes "
                  "[%0], [%1, {%2, %3}], [%4];"
                  :
                  : "r"(smem_addr(destination)), "l"(map), "r"(k), "r"(row), "r"(smem_addr(barrier))
                  : "memory");
+#endif
 }
 
 template <class Schedule, class Epilogue>

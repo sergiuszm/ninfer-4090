@@ -131,12 +131,17 @@ __device__ __forceinline__ void nvfp4_tma_load_2d(void* destination, const CUten
                                                   std::int32_t coordinate0,
                                                   std::int32_t coordinate1,
                                                   std::uint64_t* barrier) {
+#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ < 900
+    // Fork-local: TMA needs sm_90. sm_89 builds bind NVFP4 weights as A16 and never launch A4.
+    __trap();
+#else
     asm volatile("cp.async.bulk.tensor.2d.shared::cta.global.tile.mbarrier::complete_tx::bytes "
                  "[%0], [%1, {%2, %3}], [%4];"
                  :
                  : "r"(smem_addr(destination)), "l"(descriptor), "r"(coordinate0), "r"(coordinate1),
                    "r"(smem_addr(barrier))
                  : "memory");
+#endif
 }
 
 template <class Schedule, class Epilogue, class OutputPolicy, class Rows>
@@ -173,7 +178,11 @@ __launch_bounds__(Schedule::kThreads, Schedule::kMinBlocksPerSm) void nvfp4_a4_t
 
     if (threadIdx.x < Schedule::kProducerThreads) {
         if constexpr (Schedule::kProducerThreads == 128) {
+#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ < 900
+            __trap();
+#else
             asm volatile("setmaxnreg.dec.sync.aligned.u32 40;" : : : "memory");
+#endif
         }
         if (threadIdx.x == 0) {
 #pragma unroll 1
@@ -230,7 +239,11 @@ __launch_bounds__(Schedule::kThreads, Schedule::kMinBlocksPerSm) void nvfp4_a4_t
     }
 
     if constexpr (Schedule::kProducerThreads == 128) {
+#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ < 900
+        __trap();
+#else
         asm volatile("setmaxnreg.inc.sync.aligned.u32 232;" : : : "memory");
+#endif
     }
     auto& tensors             = shared.scratch.tensors;
     const int consumer_thread = static_cast<int>(threadIdx.x) - Schedule::kProducerThreads;

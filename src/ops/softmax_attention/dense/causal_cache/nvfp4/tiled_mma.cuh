@@ -119,10 +119,15 @@ __global__ __launch_bounds__(Schedule::kThreads, 1) void nvfp4_kv_tiled_mma_kern
     __syncthreads();
 
     if (tid < Schedule::kProducerThreads) {
+#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ < 900
+        // Fork-local: setmaxnreg and mbarrier need sm_90. sm_89 refuses NVFP4 KV at startup.
+        __trap();
+#else
         asm volatile("setmaxnreg.dec.sync.aligned.u32 %0;"
                      :
                      : "n"(Schedule::kProducerRegisters)
                      : "memory");
+#endif
         const int producer_tid = tid;
         for (int kb = 0; kb < key_blocks; ++kb) {
             const std::uint32_t empty_phase = 1U ^ static_cast<std::uint32_t>(kb & 1);
@@ -141,10 +146,14 @@ __global__ __launch_bounds__(Schedule::kThreads, 1) void nvfp4_kv_tiled_mma_kern
         return;
     }
 
+#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ < 900
+    __trap();
+#else
     asm volatile("setmaxnreg.inc.sync.aligned.u32 %0;"
                  :
                  : "n"(Schedule::kConsumerRegisters)
                  : "memory");
+#endif
     const int consumer_tid  = tid - Schedule::kProducerThreads;
     const int consumer_warp = consumer_tid >> 5;
     const int gid           = lane >> 2;

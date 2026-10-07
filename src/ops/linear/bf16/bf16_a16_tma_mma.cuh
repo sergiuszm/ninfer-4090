@@ -63,6 +63,10 @@ Bf16TmaDescriptors make_bf16_tma_descriptors(const Bf16A16Operands& p) {
 template <class Schedule>
 __device__ __forceinline__ void bf16_tma_load(void* destination, const CUtensorMap* map,
                                               int k_sector, int row, std::uint64_t* barrier) {
+#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ < 900
+    // Fork-local: TMA needs sm_90. sm_89 builds route BF16 TMA schedules to the MMA kernel.
+    __trap();
+#else
     if constexpr (bf16_predicated_k<Schedule>) {
         asm volatile("cp.async.bulk.tensor.2d.shared::cta.global.tile.mbarrier::complete_tx::bytes "
                      "[%0], [%1, {%2, %3}], [%4];"
@@ -78,6 +82,7 @@ __device__ __forceinline__ void bf16_tma_load(void* destination, const CUtensorM
                        "r"(smem_addr(barrier))
                      : "memory");
     }
+#endif
 }
 
 template <class Schedule, class Epilogue>
