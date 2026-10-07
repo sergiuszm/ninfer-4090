@@ -946,6 +946,11 @@ int run_nvfp4() {
     failures += run_nvfp4_case(parent, 4, ops::LinearPolicy::AllowA4, 5);
     failures += run_nvfp4_case(parent, 17, ops::LinearPolicy::AllowA4, 0);
     failures += run_nvfp4_case(parent, 1024, ops::LinearPolicy::AllowA4, 1025);
+#ifdef NINFER_SM86
+    // sm_89 has no A4 route; the batched case below runs NVFP4 A4 only.
+    failures += parent.verify_preserved("batched NVFP4 parent weight");
+    return failures;
+#endif
     constexpr std::int32_t kValueRows = 6144;
     constexpr std::int32_t kZRows     = 6144;
     constexpr std::int32_t kChannels  = 10240;
@@ -1115,6 +1120,10 @@ int run_fp8() {
                                  std::vector<std::int32_t> valid_columns, std::uint32_t seed) {
         const std::vector<float> conv_weight = make_conv_weight(kChannels, seed);
         const bool uses_a8                   = width * batch >= 17;
+#ifdef NINFER_SM86
+        // sm_89 has no A8 route; the loader binds FP8 weights as A16.
+        if (uses_a8) { return 0; }
+#endif
         const std::size_t workspace_bytes =
             ops::gdn_input_proj_conv_snapshot_workspace_capacity_bytes(
                 QType::FP8_E4M3FN_ROW_BF16, kRows, kHidden, ops::LinearPolicy::AllowA8, batch,

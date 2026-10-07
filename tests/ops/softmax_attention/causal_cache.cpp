@@ -1766,13 +1766,6 @@ int run_a1_case(DeviceExecutionView execution, const Geometry& geometry, KvCache
                 const AttentionCase& test_case, MappingPattern mapping,
                 std::span<const int> oracle_queries         = {},
                 std::span<const std::uint32_t> graph_limits = {}) {
-#ifdef NINFER_SM86
-    // sm_89 refuses NVFP4 and K8V4 KV at startup (E2M1 pack, TMA).
-    if (storage == KvCacheStorage::Nvfp4Group16 ||
-        storage == KvCacheStorage::Fp8KeyNvfp4Value) {
-        return 0;
-    }
-#endif
     const std::int32_t total       = test_case.base + test_case.tokens;
     const std::int32_t max_context = static_cast<std::int32_t>(
         std::max<std::uint32_t>(static_cast<std::uint32_t>(total + 3), test_case.envelope_max));
@@ -1903,13 +1896,6 @@ int run_a1_case(DeviceExecutionView execution, const Geometry& geometry, KvCache
 int run_a3_case(DeviceExecutionView execution, const Geometry& geometry, KvCacheStorage storage,
                 const AttentionCase& test_case, MappingPattern mapping,
                 std::span<const int> oracle_queries = {}) {
-#ifdef NINFER_SM86
-    // sm_89 refuses NVFP4 and K8V4 KV at startup (E2M1 pack, TMA).
-    if (storage == KvCacheStorage::Nvfp4Group16 ||
-        storage == KvCacheStorage::Fp8KeyNvfp4Value) {
-        return 0;
-    }
-#endif
     const std::int32_t total       = test_case.base + test_case.tokens;
     const std::int32_t max_context = static_cast<std::int32_t>(
         std::max<std::uint32_t>(static_cast<std::uint32_t>(total + 3), test_case.envelope_max));
@@ -2776,6 +2762,15 @@ int run_softmax_attention_causal_cache_tests(std::optional<KvCacheStorage> selec
          {KvCacheStorage::BFloat16, KvCacheStorage::Int8Group64, KvCacheStorage::Fp8E4M3Row256,
           KvCacheStorage::Nvfp4Group16, KvCacheStorage::Fp8KeyNvfp4Value}) {
         if (selected && storage != *selected) continue;
+#ifdef NINFER_SM86
+        // sm_89 refuses NVFP4 and K8V4 KV at startup (E2M1 pack, TMA, setmaxnreg).
+        if (storage == KvCacheStorage::Nvfp4Group16 ||
+            storage == KvCacheStorage::Fp8KeyNvfp4Value) {
+            std::cout << "SKIP causal_softmax_attention " << cache_name(storage)
+                      << " (requires compute capability 12.0)" << std::endl;
+            continue;
+        }
+#endif
         const auto start = std::chrono::steady_clock::now();
         std::cout << "RUN causal_softmax_attention " << cache_name(storage) << std::endl;
         const int current = run_storage_cases(execution, storage);
