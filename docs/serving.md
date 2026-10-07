@@ -225,18 +225,24 @@ parse fails. It then accepts a later `</parameter>` as a value's end when the ne
 `<parameter=NAME>` or `</function>` (so a value may quote unmatched markers), skips a `<tool_call>`
 quoted in prose before the real calls, and keeps prose after complete calls as content instead of
 discarding the calls. The first candidate split whose function reaches `</function>` and
-`</tool_call>` wins, with backtracking bounded per function. Output that still cannot be
-recovered falls back to ordinary content exactly as in strict mode.
+`</tool_call>` and passes the safety rules below wins. Backtracking is bounded per function to 64
+attempted value ends (the attempt budget). Output that still cannot be recovered falls back to
+ordinary content exactly as in strict mode.
 
 Safety rules. Only a `<tool_call>` followed by ordinary text (prose naming the tag) is skipped; one
 followed by `<` is an attempt to open a call, well-formed or not (`<function=`, `<funtion=`,
 `<function =`), and if it fails the output falls back rather than trying a call quoted inside its
 value. A value that would contain a `<tool_call>` or `<function=` it does not close is not a
-candidate (that is a truncated call borrowing the closes of an example inside it). There is no
-recovery at all when generation stopped on the output or context limit: a cut-off call could
-otherwise be completed by any close markup quoted in its value. Trailing text that contains another
-`<tool_call>` disables trailing recovery, and a trailing suffix of nothing but close markers (a stray
-duplicate `</tool_call>`) is dropped.
+candidate (that is a truncated call borrowing the closes of an example inside it). A call end is not
+accepted when another `</tool_call>` follows it before the next `<tool_call>` and the text between
+them is more than close markers. That end was quoted inside a value, for example in a file that
+documents how calls end, and accepting it would cut the value. Recovery then tries the next
+candidate. As a result, a call followed by prose that names `</tool_call>` falls back, as in strict
+mode, and a value that quotes the closing tags more often than the attempt budget allows also falls
+back. There is no recovery at all when generation stopped on the output or context limit: a
+cut-off call could otherwise be completed by any close markup quoted in its value. Trailing text
+that contains another `<tool_call>` disables trailing recovery, and a trailing suffix of nothing but
+close markers (a stray duplicate `</tool_call>`) is dropped.
 
 **Residual risk, by design.** An example call followed only by prose (`Here is the format:
 <tool_call>...</tool_call> Let me know if that helps.`) runs: it is indistinguishable from a real
