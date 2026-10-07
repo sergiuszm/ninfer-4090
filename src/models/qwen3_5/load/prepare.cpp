@@ -34,12 +34,21 @@ WeightId Bindings::parameter(std::string name, artifact::Shape shape,
         case artifact::ActivationPolicy::A16Only:
             result.policy = ops::LinearPolicy::A16Only;
             break;
+#if defined(NINFER_SM86)
+        // Fork-local (rtx4090-port): the A8 (FP8) and A4 (NVFP4) routes load through TMA or use
+        // E2M1 block-scale MMA, which sm_89 lacks. Those weights run their A16 routes instead.
+        case artifact::ActivationPolicy::AllowA8:
+        case artifact::ActivationPolicy::AllowA4:
+            result.policy = ops::LinearPolicy::A16Only;
+            break;
+#else
         case artifact::ActivationPolicy::AllowA8:
             result.policy = ops::LinearPolicy::AllowA8;
             break;
         case artifact::ActivationPolicy::AllowA4:
             result.policy = ops::LinearPolicy::AllowA4;
             break;
+#endif
         }
         for (const auto& [role, binding] : use.auxiliaries) {
             if (role != "activation_input_divisor") {

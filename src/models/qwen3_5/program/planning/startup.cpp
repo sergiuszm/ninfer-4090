@@ -809,9 +809,23 @@ void validate_target_options(const execution::Parameters& parameters, DeviceCont
         }
         break;
     }
+#if defined(NINFER_SM86)
+    // Fork-local (rtx4090-port): the build targets sm_89 only.
+    if (device.compute_capability() != 89) {
+        throw std::invalid_argument("Qwen3.5 family runtime requires compute capability 8.9");
+    }
+    // The NVFP4-valued KV modes pack E2M1 (cvt.e2m1x2, sm_100a+) and their attention uses TMA
+    // and setmaxnreg (sm_90). Those device bodies trap on sm_89, so refuse the modes here.
+    if (options.kv_cache == KvCacheStorage::Nvfp4Group16 ||
+        options.kv_cache == KvCacheStorage::Fp8KeyNvfp4Value) {
+        throw std::invalid_argument(
+            "nvfp4 and k8v4 KV-cache storage require compute capability 12.0");
+    }
+#else
     if (device.compute_capability() != 120) {
         throw std::invalid_argument("Qwen3.5 family runtime requires compute capability 12.0");
     }
+#endif
 }
 
 std::unique_ptr<SequencePlanImpl> build_sequence_candidate(const SequencePlanningInputs& inputs,
