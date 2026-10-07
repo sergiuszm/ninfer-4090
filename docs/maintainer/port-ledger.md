@@ -273,7 +273,7 @@ Decisions (2026-10-07):
 File map: `docs/maintainer/catchup-4-filemap.tsv` lists the 207 non-docs files that the fork
 changed since `d4929686`. The columns are the file status at `81c8ce09`, the upstream path, the
 disposition and the fork commits that changed the file. A disposition is a stage number with the
-feature ids of the plan, `carried <commit>`, or `DROP`. Each stage updates its rows when it lands.
+feature ids of the plan, `done <commit>`, or `DROP`. Each stage updates its rows when it lands.
 
 Stage 0 (carry, 2026-10-07):
 
@@ -298,6 +298,41 @@ unrotated-K hunk of `tests/ops/test_kv_cache_append.cpp` applies only to that pa
 Docs for later stages: fork edits to `README.md`, `docs/cli.md` and `docs/serving.md` wait for
 stage 6, where the flag set is final. `docs/rtx-3090-linux.md` and `docs/rtx-3090-windows.md` still
 name v1 and v2 artifacts. Refresh them at stage 7.
+
+Stage 1 (build, 2026-10-07):
+
+| Item | Commits | Notes |
+|---|---|---|
+| B1 sm_89 pin, B2 global `NINFER_SM86` | `61cb2af8` | `CMAKE_CUDA_ARCHITECTURES=89` only |
+| B2 PTX guards | `ee326e36` | `__trap()` below sm_90 (TMA, mbarrier, setmaxnreg) and sm_100 (`cvt.e2m1x2`) in 6 headers. No file exclusions and no stubs. `ops/nvfp4_sm86_stubs.cpp` is dropped |
+| B4 e4m3 MMA form | `68cffb17` | Plain e4m3 below sm_120. `mma_f16_f16acc` carried for K2 |
+| BF16 TMA routes | `8d27a15b` | On sm_89 the TMA schedules run their tile geometry on the cp.async MMA kernel. Not tuned for sm_89 |
+| Model startup and weight policies | `8632dac7` | Compute capability 8.9 required. nvfp4 and k8v4 KV refused. AllowA8 and AllowA4 weight uses bind as A16Only |
+| Op test gates | `b9d8a64e`, `409d7cb7` | A4, A8, nvfp4 and k8v4 KV cases skip under `NINFER_SM86` |
+| B5 Windows (PR #10) | not done | Upstream has no Windows code now. The fork port spans 13 files and `vcpkg.json`. `serve_options.cpp` needs a 128-bit divide that the fork shim does not have |
+
+Gates:
+
+- Full sm_89 build with tests and benches: 910 targets, 0 errors. No kernel exceeds the 48 KB static
+  shared-memory limit of sm_89.
+- ctest on the RTX 4090, serial: 142 tests pass or skip as expected. The 19 skips are the real-model
+  tests (no artifact path given) and the gated cases. Three Python oracle tests need `jinja2` and
+  `jsonschema`, which `ninfer-dev:runtime` does not have. They pass with the packages supplied.
+- Server on the v3 artifact (HF `1cbd84e7221e`), int8 KV, 131,072 tokens, C=2, vision, MTP3: healthy
+  after 6 s. Text, an 11,114-token prompt (2,132 tok/s, A16 prefill), a constrained tool call, an
+  image request and a code answer with thinking all return 200. Decode on code: 138.5 tok/s at 75%
+  MTP acceptance.
+
+VRAM finding (the main risk of the plan): int8 KV does not fit 262,144 tokens next to the weights
+(reservation 11.10 GB, 6.64 GB available), so that gate step was not possible as planned. The
+measured curve answers the question instead. Upstream needs 1.688 GB beside the KV (sequence arena
+without KV, workspace arena, CUDA graphs), the fork 1.262 GB. The difference is the workspace arena:
+upstream sizes it for one 16,384-token vision item (867 MB), the fork for 8,192 (433 MB). With E8 KV
+(18,496 B per token, text plus MTP) at 262,144 and C=2, upstream as is leaves about 103 MB of slack.
+With R12 (item cap 8,192, stage 4) it leaves about 537 MB, the same as production today (528 MB).
+R12 is therefore required before the deploy. The CUDA graph allowance holds on sm_89 (172 MB planned,
+free memory after startup above the planned slack), so R13 is not needed so far. Upstream also pins
+9.15 GiB of host memory for the context cache (production: 8 GiB host KV).
 
 ## Community triage 2026-10-07, round 4 (PR #14)
 
