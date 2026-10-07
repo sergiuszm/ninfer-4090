@@ -55,6 +55,11 @@ ninfer_add_op_test(ninfer_kv_cache_append_test
   SOURCES "${CMAKE_CURRENT_LIST_DIR}/test_kv_cache_append.cpp"
   LIBRARIES ninfer_ops)
 
+# Fork-local (rtx4090-port): the shipped E8 root codec header, header-only.
+ninfer_add_op_test(ninfer_e8_root_codec_test
+  SOURCES "${CMAKE_CURRENT_LIST_DIR}/test_e8_root_codec.cu"
+  LIBRARIES ninfer_ops)
+
 ninfer_add_op_test(ninfer_rmsnorm_rope_test
   SOURCES "${CMAKE_CURRENT_LIST_DIR}/test_rmsnorm_rope.cpp"
   LIBRARIES ninfer_ops)
@@ -125,6 +130,21 @@ ninfer_add_op_test(ninfer_gated_delta_net_replay_record_test
 ninfer_add_op_test(ninfer_gdn_replay_fold_test
   SOURCES "${CMAKE_CURRENT_LIST_DIR}/test_gdn_replay_fold.cpp"
   LIBRARIES ninfer_ops)
+
+# Fork-local (rtx4090-port): isolated E8 lattice KV codec testbed. It carries its own
+# reference implementation of the E8 mathematics and does not include
+# src/ops/kernel/e8_root_codec.cuh, so it is an algorithm oracle, not coverage of the shipped
+# codec. ninfer_e8_root_codec_test drives the production header.
+add_executable(ninfer_test_e8_codec
+  "${PROJECT_SOURCE_DIR}/tools/test_kv/verify_1m_retrieval.cu"
+  "${PROJECT_SOURCE_DIR}/tools/test_kv/test_e8_codec.cu")
+target_include_directories(ninfer_test_e8_codec PRIVATE
+  "${PROJECT_SOURCE_DIR}/tools/test_kv"
+  "${PROJECT_SOURCE_DIR}/src/ops/kernel"
+  "${PROJECT_SOURCE_DIR}/include")
+target_link_libraries(ninfer_test_e8_codec PRIVATE CUDA::cudart)
+add_test(NAME ninfer_test_e8_codec COMMAND ninfer_test_e8_codec)
+set_tests_properties(ninfer_test_e8_codec PROPERTIES SKIP_RETURN_CODE 77)
 
 include("${CMAKE_CURRENT_LIST_DIR}/linear/tests.cmake")
 include("${CMAKE_CURRENT_LIST_DIR}/linear_add/tests.cmake")
