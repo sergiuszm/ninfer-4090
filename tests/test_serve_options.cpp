@@ -75,6 +75,17 @@ int main() {
     const ServeOptions k8v4 = parse({"ninfer-serve", "model.ninfer", "--kv-dtype", "k8v4"});
     failures += check(k8v4.kv_cache == ninfer::KvCacheStorage::Fp8KeyNvfp4Value,
                       "--kv-dtype k8v4 did not select asymmetric K8V4 KV");
+    // Fork-local (rtx4090-port) KV modes.
+    for (const auto& [name, storage] :
+         {std::pair{"rk8v4", ninfer::KvCacheStorage::RotatedInt8KeyInt4ValueGroup64},
+          std::pair{"rk4v4", ninfer::KvCacheStorage::RotatedInt4KeyInt4ValueGroup64},
+          std::pair{"rk4v4-e8", ninfer::KvCacheStorage::RK4V4E8},
+          std::pair{"rk2v4-e8", ninfer::KvCacheStorage::RK2V4E8}}) {
+        const ServeOptions fork = parse({"ninfer-serve", "model.ninfer", "--kv-dtype", name});
+        const std::string message =
+            std::string("--kv-dtype ") + name + " did not select its fork KV mode";
+        failures += check(fork.kv_cache == storage, message.c_str());
+    }
     const std::string kv_help = serve_usage_text("ninfer-serve");
     failures += check(kv_help.find("nvfp4") != std::string::npos &&
                           kv_help.find("k8v4") != std::string::npos,
