@@ -21,6 +21,14 @@ void kv_cache_append_k8v4_batch_launch(const Tensor& k, const Tensor& v, const T
                                        const Tensor& valid_columns, const Tensor& table_rows,
                                        PagedKVBatchLayerView cache, cudaStream_t stream);
 
+// Fork-local (rtx4090-port): the fork KV storages (kv_storage_is_fork_mode).
+void kv_cache_append_fork_launch(const Tensor& k, const Tensor& v, const Tensor& positions,
+                                 PagedKVLayerView cache, cudaStream_t stream);
+
+void kv_cache_append_fork_batch_launch(const Tensor& k, const Tensor& v, const Tensor& positions,
+                                       const Tensor& valid_columns, const Tensor& table_rows,
+                                       PagedKVBatchLayerView cache, cudaStream_t stream);
+
 void kv_cache_append_batch_launch(const Tensor& k, const Tensor& v, const Tensor& positions,
                                   const Tensor& valid_columns, const Tensor& table_rows,
                                   PagedKVBatchLayerView cache, cudaStream_t stream);

@@ -196,6 +196,11 @@ void kv_cache_append_batch_launch(const Tensor& k, const Tensor& v, const Tensor
                                            stream);
         return;
     }
+    if (kv_storage_is_fork_mode(cache.storage)) {
+        kv_cache_append_fork_batch_launch(k, v, positions, valid_columns, table_rows, cache,
+                                          stream);
+        return;
+    }
     const auto launch = [&]<bool Masked>() {
         const PagedKVBatchMetadata<Masked> metadata{
             .tables = static_cast<const std::int32_t*>(cache.block_tables.data),
