@@ -334,6 +334,51 @@ R12 is therefore required before the deploy. The CUDA graph allowance holds on s
 free memory after startup above the planned slack), so R13 is not needed so far. Upstream also pins
 9.15 GiB of host memory for the context cache (production: 8 GiB host KV).
 
+Stage 2 (kernels, 2026-10-26):
+
+| Item | Commits | Notes |
+|---|---|---|
+| K1 fork KV modes | `549c1555` | rk8v4, rk4v4, rk4v4-e8, rk2v4-e8 at the end of `KvCacheStorage`. `kv_storage_is_fork_mode()` covers only these four: upstream `Int8Group64` keeps its d256-rotated keys and kernels |
+| K1 append path | `f1eeffdd` | rtx4090-port append kernels as `append/fork_kernel.cuh` and `append/fork_launch.cu`, dispatched from the single-request and batch entry points (the MTP layer uses the same storage). The batch entry takes one row: the e8 family appends B>1 inside its small-T kernels |
+| K2 `causal_cache/e8/` | `37ae179d`, `4184f6aa` | Option A. The rtx4090-port int8 small-T and prompt kernels moved unchanged under namespace `ops::e8`, because upstream now defines `CausalD256H24Kv4`, `kCausalHeadDim` and `CausalAppendInput` in `ops::detail`. `e8/plan` holds route, chunk and split policy, `e8/launch` the upstream family signatures. Small-T instances compile per head geometry (3.9 min instead of 7.5 min in one unit). The route now depends on the call shape only (`4184f6aa`), see below |
+| K1 names | `057737b0`, `74b90c37` | Serve, CLI, perplexity, request and operational logs, benches; serve option test |
+| Rotated-V single rounding | `e222cca2` | roofkid `5f377f22`: the inverse H64 runs on the FP32 result before the only BF16 rounding; `kv_cache_inverse_rotate_output_kernel` is gone |
+| rk4v4-e8 oracle | `ed423e61`, `77e4a456` | roofkid's host codec and FP64 oracle in upstream's rewritten harness, exact cache bytes, fused against standalone append parity. rk4v4-e8 uses the int8 criterion (see below) |
+| K6 Q4 SwiGLU WN32 | DROP | Variants bench carried (`e5315258`). On catchup4 WN32 loses to upstream WN16 in all three runs: -2.0% at T=512, -0.2% at 1024, -0.7% at 2048 |
+| `ce50e995` i8 prefill retune | DROP | `gqa_attention_prefill_i8.cuh` is gone upstream |
+| K3, K7 | DROP | As planned |
+
+Gates (magnus, four windows on 2026-10-26, production restarted healthy after each):
+
+- Full sm_89 build with tests and benches: 0 errors.
+- ctest subset: serve options, KV append, e8 root codec, `tools/test_kv` E8 codec pass. The causal
+  attention suite first aborted on rk4v4-e8 with `cudaGraphExecUpdateErrorTopologyChanged`:
+  upstream's harness updates one graph executable across visible-key envelopes for a fixed width,
+  and the rtx4090-port route took the prompt kernel for 9-16 columns over short windows (2 nodes)
+  and chunked small-T above them (2 nodes per chunk). Fixed in `4184f6aa`. Production was not
+  exposed: decode (T=1) and MTP3 verification (T=4) always take small-T.
+- Nine rk4v4-e8 cases then failed roofkid's criterion (the old int8 values) on upstream's
+  qk-amplitude cases. With `NINFER_OP_REPORT_STATS` on the 267 cases both storages run, the
+  rk4v4-e8 relative L2 error is 1.01x int8's (median), 1.20x (max), worst 0.0165 against int8's
+  0.0189 on the same case. Upstream widened the int8 criterion for these cases (`a012e2bc5`), so
+  rk4v4-e8 shares it (`77e4a456`). The full suite then passes: bf16, int8, fp8 and rk4v4-e8
+  (nvfp4 and k8v4 skip on sm_89).
+- Real-model attention integration (upstream prefix_real `attention` scenario) on rk4v4-e8:
+  B=2 MTP, B=1 MTP and B=2 without speculation pass (prefill, multi-row decode, prefix reuse with a
+  34-token append, workspace within plan).
+- Perplexity (`--quick`, rk4v4-e8, A16, v3 artifact): 4.364069. Production code on v2: 4.363573
+  (+0.011%). T-Crypt's v3 branch: 4.362391.
+- Server at the production shape (rk4v4-e8, 262,144, C=2, vision, MTP3) on the v3 artifact: healthy
+  after 6 s; text, 11K prefill, tool call, image and thinking all return 200; `/metrics` answers.
+  VRAM after boot 23,858 MiB (226 MiB free) against production's binary in A16 at 23,444 MiB
+  (640 MiB free): R12 (stage 4) is still required.
+- Against the production binary in A16, same client, cold prefill: 6K -1.1%, 50K +0.8%,
+  128K +2.3% (one cold run each; repeats hit the context cache on both binaries). Decode:
+  23.6 ms against 23.3 ms per MTP round (+1.4%); acceptance follows the text (outputs differ on
+  15 of 16 probes: v3 artifact and template). The round-time gap is open (upstream MTP runs two
+  graphs per round since `08902f73`; not profiled).
+- rk8v4, rk4v4 and rk2v4-e8 build and dispatch but have no oracle, as on rtx4090-port.
+
 ## Community triage 2026-10-07, round 4 (PR #14)
 
 T-Crypt answered the round-3 P1 with `e7495e6c` on 2026-10-06. The commit implements the rule that
