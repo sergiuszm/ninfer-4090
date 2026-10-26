@@ -31,6 +31,12 @@ enum class KvCacheStorage : std::uint8_t {
     Fp8E4M3Row256,
     Nvfp4Group16,
     Fp8KeyNvfp4Value,
+    // Fork-local (rtx4090-port): rotated group-64 int8-family modes with 4-bit values and int8,
+    // 4-bit or E8-coded keys. They run the fork append path and the causal_cache/e8/ family.
+    RotatedInt8KeyInt4ValueGroup64,
+    RotatedInt4KeyInt4ValueGroup64,
+    RK4V4E8,
+    RK2V4E8,
 };
 
 enum class EnginePurpose : std::uint8_t {
