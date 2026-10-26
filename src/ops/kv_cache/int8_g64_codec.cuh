@@ -130,33 +130,6 @@ __device__ __forceinline__ void kv_cache_hadamard64(float& x0, float& x1,
     x1            = (a - b) * 0.125f;
 }
 
-template <int QHeads>
-__global__ void kv_cache_inverse_rotate_output_kernel(__nv_bfloat16* output, int width,
-                                                      int full_width, int column_begin,
-                                                      const std::int32_t* valid_columns) {
-    const int unit = static_cast<int>(blockIdx.x);
-    const int lane = static_cast<int>(threadIdx.x);
-    if (lane >= 32) { return; }
-    const int group  = unit % kKVCacheInt8Groups;
-    const int tmp    = unit / kKVCacheInt8Groups;
-    const int q_head = tmp % QHeads;
-    const int row    = tmp / QHeads;
-    const int batch  = row / width;
-    const int token  = row - batch * width;
-    const int column = column_begin + token;
-    if (token >= width || (valid_columns != nullptr && column >= valid_columns[batch])) { return; }
-    const int d0            = group * kKVCacheInt8Group + lane;
-    const int d1            = d0 + 32;
-    const std::int64_t base = static_cast<std::int64_t>(kKVCacheInt8HeadDim) *
-                              (q_head + static_cast<std::int64_t>(QHeads) *
-                                            (column + static_cast<std::int64_t>(full_width) * batch));
-    float x0 = __bfloat162float(output[base + d0]);
-    float x1 = __bfloat162float(output[base + d1]);
-    kv_cache_hadamard64(x0, x1);
-    output[base + d0] = __float2bfloat16(x0);
-    output[base + d1] = __float2bfloat16(x1);
-}
-
 __device__ __forceinline__ void kv_cache_unpack_i4x16(const std::uint8_t* src8,
                                                       std::int8_t* dst16) {
     const std::uint64_t raw = load_vec<std::uint64_t>(src8);

@@ -625,14 +625,65 @@ __global__ __maxnreg__(NINFER_CAUSAL_PROMPT_I8_MAXNREG) void causal_attention_pr
         row1 < tile_rows ? out + causal_prompt_q_row_offset<Geometry>(q_head, q0 + row1) : nullptr;
 #pragma unroll
     for (int n = 0; n < PVNtPerWarp; ++n) {
+        acc[n][0] *= inv_l0;
+        acc[n][1] *= inv_l0;
+        acc[n][2] *= inv_l1;
+        acc[n][3] *= inv_l1;
+    }
+    if constexpr (RotateV) {
+        // Each warp owns whole 64-dimension groups of its rows: in-group bit 0 is the fragment
+        // column pair, bits 1-2 the quad lane, bits 3-5 the n tile. Undo the cache's H64 in FP32
+        // before the only BF16 rounding.
+        static_assert(PVNtPerWarp % 8 == 0, "a prompt warp must own whole V groups");
+#pragma unroll
+        for (int n = 0; n < PVNtPerWarp; ++n) {
+#pragma unroll
+            for (int r = 0; r < 4; r += 2) {
+                const float a = acc[n][r];
+                const float b = acc[n][r + 1];
+                acc[n][r]     = a + b;
+                acc[n][r + 1] = a - b;
+            }
+        }
+#pragma unroll
+        for (int offset = 1; offset < 4; offset <<= 1) {
+#pragma unroll
+            for (int n = 0; n < PVNtPerWarp; ++n) {
+#pragma unroll
+                for (int r = 0; r < 4; ++r) {
+                    const float other = __shfl_xor_sync(0xffffffffu, acc[n][r], offset);
+                    acc[n][r]         = (lid & offset) ? other - acc[n][r] : acc[n][r] + other;
+                }
+            }
+        }
+#pragma unroll
+        for (int stride = 1; stride < 8; stride <<= 1) {
+#pragma unroll
+            for (int n = 0; n < PVNtPerWarp; ++n) {
+                if ((n & stride) != 0) continue;
+#pragma unroll
+                for (int r = 0; r < 4; ++r) {
+                    const float a     = acc[n][r];
+                    const float b     = acc[n + stride][r];
+                    acc[n][r]          = a + b;
+                    acc[n + stride][r] = a - b;
+                }
+            }
+        }
+#pragma unroll
+        for (int n = 0; n < PVNtPerWarp; ++n) {
+#pragma unroll
+            for (int r = 0; r < 4; ++r) { acc[n][r] *= 0.125f; }
+        }
+    }
+#pragma unroll
+    for (int n = 0; n < PVNtPerWarp; ++n) {
         const int d0 = (d_slice * PVNtPerWarp + n) * 8 + 2 * lid;
         if (out_row0 != nullptr) {
-            *reinterpret_cast<unsigned*>(&out_row0[d0]) =
-                pack_bf16x2(acc[n][0] * inv_l0, acc[n][1] * inv_l0);
+            *reinterpret_cast<unsigned*>(&out_row0[d0]) = pack_bf16x2(acc[n][0], acc[n][1]);
         }
         if (out_row1 != nullptr) {
-            *reinterpret_cast<unsigned*>(&out_row1[d0]) =
-                pack_bf16x2(acc[n][2] * inv_l1, acc[n][3] * inv_l1);
+            *reinterpret_cast<unsigned*>(&out_row1[d0]) = pack_bf16x2(acc[n][2], acc[n][3]);
         }
     }
     causal_prompt_zero_output_rows<Geometry>(out, q_head, tokens, min(q0 + Br, width), tid,

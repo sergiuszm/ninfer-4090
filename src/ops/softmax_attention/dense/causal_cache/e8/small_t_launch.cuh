@@ -158,21 +158,25 @@ void launch_partial_for_profile(const Tensor& q, CacheInput input, const Tensor&
     }
 }
 
+// Every fork storage stores V rotated per 64-dimension group (KvForkModeFlags::rotate_v), so the
+// reduce always rotates the merged FP32 output back before its only BF16 rounding.
 template <typename Geometry>
 void launch_reduce(const Tensor& pos, const SmallTInvocation& invocation, std::int32_t splits,
                    const E8SmallTPartials& partial, Tensor& out, cudaStream_t stream) {
     constexpr int kReduceBlock = 256;
     constexpr int kDChunk      = Geometry::QHeads == 24 ? 256 : 64;
-    const auto launch          = [&]<bool MultiBatch, bool Masked, bool Offset>() {
-        const dim3 grid(Geometry::QHeads, div_up(e8::kCausalHeadDim, kDChunk),
-                                 invocation.width * invocation.batch_size);
-        e8::causal_attention_small_t_reduce_output_kernel<
-                     Geometry, kDChunk, true, MultiBatch, Masked, Offset><<<grid, kReduceBlock, 0, stream>>>(
+    const dim3 grid(Geometry::QHeads, div_up(e8::kCausalHeadDim, kDChunk),
+                    invocation.width * invocation.batch_size);
+    const auto launch = [&]<bool MultiBatch, bool Masked, bool Offset>() {
+        const auto kernel =
+            e8::causal_attention_small_t_reduce_output_kernel<Geometry, kDChunk, true, MultiBatch,
+                                                              Masked, Offset, true>;
+        kernel<<<grid, kReduceBlock, 0, stream>>>(
             static_cast<const float*>(partial.acc.data), static_cast<const float*>(partial.m.data),
             static_cast<const float*>(partial.l.data), static_cast<const std::int32_t*>(pos.data),
             invocation.valid_columns
-                         ? static_cast<const std::int32_t*>(invocation.valid_columns->data)
-                         : nullptr,
+                ? static_cast<const std::int32_t*>(invocation.valid_columns->data)
+                : nullptr,
             invocation.width, invocation.full_width, invocation.column_begin, invocation.batch_size,
             splits, static_cast<__nv_bfloat16*>(out.data));
     };
@@ -194,20 +198,6 @@ void launch_reduce(const Tensor& pos, const SmallTInvocation& invocation, std::i
     } else {
         launch_offset.template operator()<true, false>();
     }
-    CUDA_CHECK(cudaGetLastError());
-}
-
-// The cache stores V rotated per 64-dimension group; rotate the BF16 output back.
-template <typename Geometry>
-void launch_inverse_rotate(const SmallTInvocation& invocation, Tensor& out, cudaStream_t stream) {
-    const int units =
-        invocation.batch_size * invocation.width * Geometry::QHeads * kKVCacheInt8Groups;
-    kv_cache_inverse_rotate_output_kernel<Geometry::QHeads><<<units, 32, 0, stream>>>(
-        static_cast<__nv_bfloat16*>(out.data), invocation.width, invocation.full_width,
-        invocation.column_begin,
-        invocation.valid_columns == nullptr
-            ? nullptr
-            : static_cast<const std::int32_t*>(invocation.valid_columns->data));
     CUDA_CHECK(cudaGetLastError());
 }
 
@@ -260,9 +250,6 @@ void small_t_launch_for(const Tensor& q, CacheInput input, const Tensor& pos, fl
         throw std::invalid_argument("e8 causal attention small-T: unsupported T");
     }
     launch_reduce<Geometry>(pos, invocation, splits, partial, out, stream);
-    if (kv_fork_mode_flags(cache.storage).rotate_v) {
-        launch_inverse_rotate<Geometry>(invocation, out, stream);
-    }
 }
 
 #define NINFER_E8_SMALL_T_INSTANCE(PREFIX, GEOMETRY, INPUT)                                        \

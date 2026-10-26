@@ -193,13 +193,17 @@ causal_merge_split_statistics(const float* partial_m, const float* partial_l, in
     return total;
 }
 
-template <typename Geometry, int DChunk, bool Int8, bool MultiBatch, bool Masked, bool Offset>
+// RotateV: the cache stores V rotated by the normalized H64 per 64-dimension group, so the merged
+// FP32 output is rotated back here, before its only BF16 rounding.
+template <typename Geometry, int DChunk, bool Int8, bool MultiBatch, bool Masked, bool Offset,
+          bool RotateV = false>
 __launch_bounds__(256) __global__ void causal_attention_small_t_reduce_output_kernel(
     const float* partial_acc, const float* partial_m, const float* partial_l,
     const std::int32_t* positions, const std::int32_t* valid_columns, std::int32_t tokens,
     std::int32_t full_width, std::int32_t column_begin, std::int32_t batch_size,
     std::int32_t split_count, __nv_bfloat16* out) {
     static_assert(DChunk > 0 && DChunk <= kCausalHeadDim);
+    static_assert(!RotateV || DChunk % 64 == 0, "a rotated output chunk holds whole groups");
 
     const int q_head      = static_cast<int>(blockIdx.x);
     const int d_start     = static_cast<int>(blockIdx.y) * DChunk;
@@ -251,17 +255,35 @@ __launch_bounds__(256) __global__ void causal_attention_small_t_reduce_output_ke
     const float head_l =
         causal_merge_split_statistics<Geometry>(partial_m, partial_l, q_head, token, tokens,
                                                 active_split_count, weights, warp_sums, scalars);
-    const int d = d_start + tid;
-    if (tid >= DChunk || d >= kCausalHeadDim) return;
+    const int d       = d_start + tid;
+    const bool active = tid < DChunk && d < kCausalHeadDim;
+    if (!RotateV && !active) return;
     float numerator = 0.0f;
-    for (int split = 0; split < active_split_count; ++split) {
-        if (weights[split] != 0.0f)
-            numerator +=
-                partial_acc[causal_partial_acc_index<Geometry>(q_head, d, token, split, tokens)] *
-                weights[split];
+    if (active) {
+        for (int split = 0; split < active_split_count; ++split) {
+            if (weights[split] != 0.0f)
+                numerator += partial_acc[causal_partial_acc_index<Geometry>(q_head, d, token, split,
+                                                                           tokens)] *
+                             weights[split];
+        }
     }
 
-    const float value = (head_l > 0.0f) ? numerator / head_l : 0.0f;
+    float value = (head_l > 0.0f) ? numerator / head_l : 0.0f;
+    if constexpr (RotateV) {
+        // Lanes carry in-group bits 0-4 and the warp parity carries bit 5 (DChunk % 64 == 0).
+        __shared__ float half_s[256];
+        const int lane = tid & 31;
+#pragma unroll
+        for (int offset = 1; offset < 32; offset <<= 1) {
+            const float other = __shfl_xor_sync(0xffffffffu, value, offset);
+            value             = (lane & offset) ? other - value : value + other;
+        }
+        half_s[tid] = value;
+        __syncthreads();
+        const float other = half_s[tid ^ 32];
+        value             = (tid & 32) ? (other - value) * 0.125f : (value + other) * 0.125f;
+        if (!active) return;
+    }
     out[causal_q_index<Geometry>(q_head, d, output_column)] = __float2bfloat16(value);
 }
 

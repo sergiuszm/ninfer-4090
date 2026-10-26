@@ -102,12 +102,6 @@ void prompt_attention_for(const Tensor& q, const Tensor& positions, float scale,
         launch.template operator()<false, false>();
     }
     CUDA_CHECK(cudaGetLastError());
-    if (mode.rotate_v) {
-        kv_cache_inverse_rotate_output_kernel<Geometry::QHeads>
-            <<<tokens * Geometry::QHeads * kKVCacheInt8Groups, 32, 0, stream>>>(
-                static_cast<__nv_bfloat16*>(out.data), tokens, tokens, 0, nullptr);
-        CUDA_CHECK(cudaGetLastError());
-    }
 }
 
 template <typename CacheView, typename Metadata>
