@@ -12,9 +12,7 @@
 namespace ninfer::ops::detail {
 namespace {
 
-constexpr std::int32_t kMaximumVerifyTokens          = 16;
-constexpr std::uint32_t kTwoChunkPromptVisibleKeys   = 512;
-constexpr std::uint32_t kThreeChunkPromptVisibleKeys = 1024;
+constexpr std::int32_t kMaximumVerifyTokens = 16;
 
 // Supplies an upper bound for the device-side active-split policy over one explicit execution
 // envelope. Eager calls normally pass an exact window; graph calls pass their target-private
@@ -87,22 +85,16 @@ std::int32_t launch_capacity(CausalAttentionExecutionEnvelope envelope, std::int
 
 E8KvRoute e8_kv_resolve_route(std::int32_t q_heads, std::int32_t width, std::int32_t batch_size,
                               CausalAttentionExecutionEnvelope envelope) {
-    if (q_heads == 24 && width <= kMaximumVerifyTokens) {
-        if (batch_size == 1) {
-            const std::uint32_t prompt_limit = width <= 8 ? 0 : 256;
-            if (envelope.max_visible_keys <= prompt_limit) { return E8KvRoute::Prompt; }
-        }
-        return width <= 8 ? E8KvRoute::SmallT : E8KvRoute::ChunkedSmallT;
-    }
-    if (width <= 6) { return E8KvRoute::SmallT; }
-    if (batch_size > 1) { return E8KvRoute::ChunkedSmallT; }
-    const std::uint32_t prompt_visible_keys =
-        width <= 12 ? kTwoChunkPromptVisibleKeys : kThreeChunkPromptVisibleKeys;
-    if (q_heads == 16 && width <= kMaximumVerifyTokens &&
-        envelope.max_visible_keys > prompt_visible_keys) {
-        return E8KvRoute::ChunkedSmallT;
-    }
-    return E8KvRoute::Prompt;
+    // The route depends on the call shape only, never on the visible-key envelope. A CUDA graph
+    // captured at one envelope is updated in place for another, so both must have the same node
+    // topology. rtx4090-port also took the prompt route for 9-16 columns over short windows (up
+    // to 256 keys for 24 query heads, 512/1024 for 16); that changed the node count at the
+    // window boundary.
+    (void)batch_size;
+    (void)envelope;
+    if (width > kMaximumVerifyTokens) { return E8KvRoute::Prompt; }
+    const std::int32_t small_t_width = q_heads == 24 ? 8 : 6;
+    return width <= small_t_width ? E8KvRoute::SmallT : E8KvRoute::ChunkedSmallT;
 }
 
 std::int32_t e8_kv_chunk_tokens(std::int32_t q_heads, std::int32_t width, std::int32_t batch_size,
