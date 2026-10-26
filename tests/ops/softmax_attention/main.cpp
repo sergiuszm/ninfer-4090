@@ -26,7 +26,7 @@ int main(int argc, char** argv) {
     } catch (const std::exception& error) {
         std::cerr << error.what()
                   << "\nusage: ninfer_softmax_attention_test [--causal-only] "
-                     "[--kv-dtype bf16|int8|fp8|nvfp4|k8v4|all]\n";
+                     "[--kv-dtype bf16|int8|fp8|nvfp4|k8v4|rk4v4-e8|all]\n";
         return 2;
     }
     const int causal = run_softmax_attention_causal_cache_tests(storage);
