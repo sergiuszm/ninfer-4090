@@ -42,6 +42,9 @@ ninfer_add_op_bench(ninfer_q8_linear_swiglu_bench SOURCES "${CMAKE_CURRENT_LIST_
 ninfer_add_op_bench(ninfer_nvfp4_linear_swiglu_bench SOURCES "${CMAKE_CURRENT_LIST_DIR}/nvfp4_linear_swiglu_bench.cu")
 ninfer_add_op_bench(ninfer_fp8_linear_swiglu_bench SOURCES "${CMAKE_CURRENT_LIST_DIR}/fp8_linear_swiglu_bench.cu")
 ninfer_add_op_bench(ninfer_q4_linear_swiglu_bench SOURCES "${CMAKE_CURRENT_LIST_DIR}/q4_linear_swiglu_bench.cu")
+# Fork-local (rtx4090-port): sm_89 schedule sweep of the Q4 gate/up GEMM (catch-up #4 K6).
+ninfer_add_op_bench(ninfer_q4_linear_swiglu_variants_bench
+  SOURCES "${CMAKE_CURRENT_LIST_DIR}/q4_linear_swiglu_variants_bench.cu")
 ninfer_add_op_bench(ninfer_q8_linear_add_bench SOURCES "${CMAKE_CURRENT_LIST_DIR}/q8_linear_add_bench.cu")
 ninfer_add_op_bench(ninfer_q5_linear_add_bench SOURCES "${CMAKE_CURRENT_LIST_DIR}/q5_linear_add_bench.cu")
 ninfer_add_op_bench(ninfer_bf16_linear_add_bench SOURCES "${CMAKE_CURRENT_LIST_DIR}/bf16_linear_add_bench.cu")
