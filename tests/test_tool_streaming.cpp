@@ -604,8 +604,9 @@ void tolerant_protocols() {
             "an example call followed by prose and another call was not a request error");
 }
 
-// Fork-local (PR #14): the serve request path, Chat and Messages, without tool_constraints and with
-// an explicit auto. The flag reaches the decoder; it acts only on the free route.
+// Fork-local (PR #14): the serve request path, Chat and Messages, without tool_constraints (the
+// server default) and with an explicit auto. The flag reaches the decoder; it acts only on the free
+// route.
 void tolerant_request_path() {
     product::ServeOptions server;
     server.tolerant_tool_calls = true;
@@ -647,7 +648,8 @@ void tolerant_request_path() {
         {"messages", {{{"role", "user"}, {"content", "write it"}}}},
         {"tools",
          {{{"type", "function"}, {"function", {{"name", "write"}, {"parameters", schema}}}}}}};
-    decode(parse_chat_completion_request(chat, {}).generation, "Chat without tool_constraints");
+    decode(parse_chat_completion_request(chat, request_limits(server)).generation,
+           "Chat without tool_constraints");
     chat["tool_constraints"] = "auto";
     const auto chat_auto     = parse_chat_completion_request(chat, {}).generation;
     require(!chat_auto.constrains_tools(), "Chat auto was constrained");
@@ -656,7 +658,7 @@ void tolerant_request_path() {
                             {"max_tokens", 64},
                             {"messages", {{{"role", "user"}, {"content", "write it"}}}},
                             {"tools", {{{"name", "write"}, {"input_schema", schema}}}}};
-    decode(parse_anthropic_messages_request(messages, {}).generation,
+    decode(parse_anthropic_messages_request(messages, request_limits(server)).generation,
            "Messages without tool_constraints");
     messages["tool_constraints"] = "auto";
     const auto messages_auto     = parse_anthropic_messages_request(messages, {}).generation;
