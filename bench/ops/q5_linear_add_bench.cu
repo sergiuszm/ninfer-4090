@@ -45,7 +45,12 @@ struct Options {
     bool profile              = false;
     std::uint64_t flush_bytes = kDefaultFlushMiB << 20;
     std::string csv_out;
+    ops::LinearPolicy policy = ops::LinearPolicy::A16Only;
 };
+
+const char* policy_name(ops::LinearPolicy policy) {
+    return policy == ops::LinearPolicy::AllowA8 ? "a8" : "a16";
+}
 
 void usage(const char* argv0) {
     std::printf("Usage:\n"
@@ -54,6 +59,7 @@ void usage(const char* argv0) {
                 "  --warmup N         Warmup launches per point (default %d).\n"
                 "  --repeat N         Measured samples per point (default %d).\n"
                 "  --execution MODE   eager (default) or graph; time one complete public Op.\n"
+                "  --policy a16|a8    Activation permission (default a16); a8 is INT8 group-64.\n"
                 "  --flush-mib N      L2 eviction buffer size (default %zu MiB).\n"
                 "  --csv-out PATH     Write all measurement rows as CSV.\n"
                 "  --profile          Report the public shape and workspace query for one T.\n",
@@ -84,6 +90,15 @@ Options parse_options(int argc, char** argv) {
                 options.graph = false;
             } else {
                 throw std::invalid_argument("--execution must be eager or graph");
+            }
+        } else if (argument == "--policy") {
+            const std::string_view value = next("--policy value");
+            if (value == "a16") {
+                options.policy = ops::LinearPolicy::A16Only;
+            } else if (value == "a8") {
+                options.policy = ops::LinearPolicy::AllowA8;
+            } else {
+                throw std::invalid_argument("--policy must be a16 or a8");
             }
         } else if (argument == "--flush-mib") {
             options.flush_bytes =
@@ -155,7 +170,7 @@ int main(int argc, char** argv) {
             QType::Q5_G64_FP16, kRows, options.hidden, options.hidden, 501U);
 
         const std::size_t workspace_capacity = ops::linear_add_workspace_capacity_bytes(
-            QType::Q5_G64_FP16, kRows, options.hidden, min_t, max_t);
+            QType::Q5_G64_FP16, kRows, options.hidden, options.policy, min_t, max_t);
         // The A16 routes report a zero-capacity profile, and the arena type rejects a zero-byte
         // allocation, so the owning arena is non-empty here. Every row still reports how many of
         // those bytes the public Op actually consumes.
@@ -168,24 +183,25 @@ int main(int argc, char** argv) {
             Tensor x(input.span(), DType::BF16, {options.hidden, tokens});
             Tensor out(residual.span(), DType::BF16, {kRows, tokens});
             workspace.reset();
-            ops::linear_add(x, packed.weight, out, ops::LinearPolicy::A16Only, workspace, cuda);
+            ops::linear_add(x, packed.weight, out, options.policy, workspace, cuda);
             CUDA_CHECK(cudaStreamSynchronize(stream));
-            std::printf("profile op=linear_add qtype=q5_g64_fp16 rows=%d k=%d T=%d "
+            std::printf("profile op=linear_add qtype=q5_g64_fp16 policy=%s rows=%d k=%d T=%d "
                         "workspace_sweep=%zu workspace_exact=%zu workspace_used=%zu\n",
-                        kRows, options.hidden, tokens, workspace_capacity,
-                        ops::linear_add_workspace_capacity_bytes(
-                            QType::Q5_G64_FP16, kRows, options.hidden, ops::LinearPolicy::A16Only,
-                            tokens, tokens),
+                        policy_name(options.policy), kRows, options.hidden, tokens,
+                        workspace_capacity,
+                        ops::linear_add_workspace_capacity_bytes(QType::Q5_G64_FP16, kRows,
+                                                                 options.hidden, options.policy,
+                                                                 tokens, tokens),
                         workspace.used());
             CUDA_CHECK(cudaStreamDestroy(stream));
             return 0;
         }
 
         std::printf("# execution=%s warmup=%d repeat=%d flush_bytes=%llu workspace_sweep_bytes=%zu "
-                    "op=linear_add qtype=q5_g64_fp16 rows=%d k=%d\n",
+                    "op=linear_add qtype=q5_g64_fp16 policy=%s rows=%d k=%d\n",
                     options.graph ? "graph" : "eager", options.warmup, options.repeat,
-                    static_cast<unsigned long long>(options.flush_bytes), workspace_capacity, kRows,
-                    options.hidden);
+                    static_cast<unsigned long long>(options.flush_bytes), workspace_capacity,
+                    policy_name(options.policy), kRows, options.hidden);
 
         std::vector<Row> rows;
         rows.reserve(options.tokens.size());
@@ -195,7 +211,7 @@ int main(int argc, char** argv) {
             Tensor out(residual.span(), DType::BF16, {kRows, tokens});
             const auto restore = [&](CudaExecutionView cuda) { residual_initial.restore(cuda); };
             const auto body    = [&](CudaExecutionView cuda) {
-                ops::linear_add(x, packed.weight, out, ops::LinearPolicy::A16Only, workspace, cuda);
+                ops::linear_add(x, packed.weight, out, options.policy, workspace, cuda);
             };
 
             bench::TimedGraph graph;
@@ -226,8 +242,7 @@ int main(int argc, char** argv) {
             row.projection_flops      = 2.0 * static_cast<double>(kRows) * options.hidden * tokens;
             row.workspace_sweep_bytes = workspace_capacity;
             row.workspace_exact_bytes = ops::linear_add_workspace_capacity_bytes(
-                QType::Q5_G64_FP16, kRows, options.hidden, ops::LinearPolicy::A16Only, tokens,
-                tokens);
+                QType::Q5_G64_FP16, kRows, options.hidden, options.policy, tokens, tokens);
             row.workspace_used_bytes = workspace_used;
             const double seconds     = timing.median_us * 1.0e-6;
             std::printf("K=%-5d T=%-4d %-5s nodes=%zu median=%9.3f us min=%9.3f p95=%9.3f "
@@ -247,20 +262,22 @@ int main(int argc, char** argv) {
             std::fprintf(file,
                          "op,rows,k,t,execution,graph_nodes,median_us,min_us,p95_us,weight_bytes,"
                          "logical_bytes,projection_flops,effective_gbs,dram_spec_pct,useful_tflops,"
-                         "workspace_sweep_bytes,workspace_exact_bytes,workspace_used_bytes\n");
+                         "workspace_sweep_bytes,workspace_exact_bytes,workspace_used_bytes,"
+                         "policy\n");
             for (const Row& row : rows) {
                 const double seconds = row.timing.median_us * 1.0e-6;
                 const double gbs     = row.logical_bytes / seconds / 1.0e9;
                 std::fprintf(file,
                              "linear_add,%d,%d,%d,%s,%zu,%.3f,%.3f,%.3f,%llu,%llu,%.0f,%.2f,%.2f,"
-                             "%.3f,%zu,%zu,%zu\n",
+                             "%.3f,%zu,%zu,%zu,%s\n",
                              kRows, options.hidden, row.tokens, row.execution, row.graph_nodes,
                              row.timing.median_us, row.timing.min_us, row.timing.p95_us,
                              static_cast<unsigned long long>(row.weight_bytes),
                              static_cast<unsigned long long>(row.logical_bytes),
                              row.projection_flops, gbs, gbs / bench::kRoofline.memory_gbs * 100.0,
                              row.projection_flops / seconds / 1.0e12, row.workspace_sweep_bytes,
-                             row.workspace_exact_bytes, row.workspace_used_bytes);
+                             row.workspace_exact_bytes, row.workspace_used_bytes,
+                             policy_name(options.policy));
             }
             std::fclose(file);
         }
