@@ -5,15 +5,20 @@
 
 #include <cuda_runtime_api.h>
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <condition_variable>
 #include <cstdint>
 #include <cstdlib>
+#include <iomanip>
 #include <iostream>
+#include <mutex>
 #include <optional>
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -2052,39 +2057,137 @@ int verify_loaded_product(const ninfer::Engine& engine) {
     return 0;
 }
 
+// Fork-local (catch-up #4): the default scenario names each step on stderr (unbuffered) with the
+// seconds since the first step, so a run that hangs or dies shows the step it reached.
+// NINFER_PREFIX_REAL_STEPS=<name>[,<name>...] runs only those steps, with the same engines.
+void trace_step(std::string_view step) {
+    static const auto start = std::chrono::steady_clock::now();
+    std::cerr << "prefix_real step " << step << " at " << std::fixed << std::setprecision(1)
+              << std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count()
+              << " s\n";
+}
+
+// While one shared-engine step runs longer than 60 s, print the engine's request counters every
+// 30 s, so a stalled step shows its scheduling state.
+class StallReporter {
+public:
+    explicit StallReporter(const ninfer::Engine& engine)
+        : engine_(engine), thread_([this](std::stop_token stop) { run(stop); }) {}
+
+    void step(std::string_view name) {
+        std::lock_guard lock(mutex_);
+        step_  = name;
+        since_ = std::chrono::steady_clock::now();
+    }
+
+private:
+    void run(std::stop_token stop) {
+        std::unique_lock lock(mutex_);
+        while (!stop.stop_requested()) {
+            wake_.wait_for(lock, stop, std::chrono::seconds(30), [] { return false; });
+            if (stop.stop_requested()) break;
+            const auto running = std::chrono::steady_clock::now() - since_;
+            if (step_.empty() || running < std::chrono::seconds(60)) continue;
+            const auto stats = engine_.snapshot().runtime;
+            std::cerr << "prefix_real stall " << step_ << " running "
+                      << std::chrono::duration_cast<std::chrono::seconds>(running).count()
+                      << " s: running " << stats.running_requests << " prefilling "
+                      << stats.prefilling_requests << " decode_ready " << stats.decode_ready_requests
+                      << " waiting " << stats.waiting_requests << " paused " << stats.paused_requests
+                      << " replaying " << stats.replaying_requests << " materializing "
+                      << stats.materializing_requests << " capture_pending "
+                      << stats.capture_pending_requests << " terminal_pending "
+                      << stats.terminal_pending_requests << " generated " << stats.generated_tokens
+                      << " prefill " << stats.computed_prefill_tokens << '\n';
+        }
+    }
+
+    const ninfer::Engine& engine_;
+    std::mutex mutex_;
+    std::condition_variable_any wake_;
+    std::string_view step_;
+    std::chrono::steady_clock::time_point since_;
+    std::jthread thread_;
+};
+
+const std::vector<std::string>& selected_steps() {
+    static const std::vector<std::string> steps = [] {
+        std::vector<std::string> result;
+        const char* value = std::getenv("NINFER_PREFIX_REAL_STEPS");
+        std::string_view rest(value ? value : "");
+        while (!rest.empty()) {
+            const auto comma = rest.find(',');
+            if (comma != 0) result.emplace_back(rest.substr(0, comma));
+            rest = comma == std::string_view::npos ? std::string_view{} : rest.substr(comma + 1);
+        }
+        return result;
+    }();
+    return steps;
+}
+
+bool step_selected(std::string_view step) {
+    const auto& steps = selected_steps();
+    return steps.empty() || std::find(steps.begin(), steps.end(), step) != steps.end();
+}
+
+using EngineStep   = std::pair<std::string_view, int (*)(ninfer::Engine&)>;
+using ArtifactStep = std::pair<std::string_view, int (*)(const char*)>;
+
+// One engine serves the first block; each later step builds its own (upstream's order).
+constexpr EngineStep kSharedEngineSteps[] = {
+    {"verify_loaded_product", [](ninfer::Engine& engine) { return verify_loaded_product(engine); }},
+    {"artifact_frontend", [](ninfer::Engine& engine) { return exercise_artifact_frontend(engine); }},
+    {"stream_observations", exercise_stream_observations},
+    {"admission_wait", exercise_admission_wait},
+    {"full_prefill_chunk", exercise_full_prefill_chunk},
+    {"rewrite_checkpoints", exercise_rewrite_checkpoints},
+    {"prefix", exercise_prefix},
+    {"abandoned_handle_capacity", exercise_abandoned_handle_capacity},
+};
+
+constexpr ArtifactStep kOwnEngineSteps[] = {
+    {"rewrite_branch", exercise_rewrite_branch},
+    {"late_instructions", exercise_late_instructions},
+    {"vision",
+     [](const char* artifact) {
+         ninfer::Engine engine(engine_options(artifact));
+         return exercise_vision(engine);
+     }},
+    {"semantic_captures", exercise_semantic_captures},
+    {"host_restore", exercise_host_restore},
+    {"explicit_prefix", exercise_explicit_prefix},
+    {"nested_tool_markers", exercise_nested_tool_markers},
+    {"explicit_anchor_branch", exercise_explicit_anchor_branch},
+    {"concurrent_resource_settlement", exercise_concurrent_resource_settlement},
+};
+
 } // namespace
 
 int exercise_artifact(const char* artifact) {
-    {
+    for (const auto& step : selected_steps()) {
+        const auto named = [&](const auto& entry) { return entry.first == step; };
+        if (std::none_of(std::begin(kSharedEngineSteps), std::end(kSharedEngineSteps), named) &&
+            std::none_of(std::begin(kOwnEngineSteps), std::end(kOwnEngineSteps), named))
+            throw std::invalid_argument("unknown NINFER_PREFIX_REAL_STEPS step: " + step);
+    }
+    const auto selected = [](const auto& entry) { return step_selected(entry.first); };
+    if (std::any_of(std::begin(kSharedEngineSteps), std::end(kSharedEngineSteps), selected)) {
+        trace_step("(shared engine)");
         auto options = engine_options(artifact);
         ninfer::test::qwen3_5::set_context_capacity(options, 2);
         ninfer::Engine engine(std::move(options));
-        if (const int result = verify_loaded_product(engine); result != 0) { return result; }
-        if (const int result = exercise_artifact_frontend(engine); result != 0) { return result; }
-        if (const int result = exercise_stream_observations(engine); result != 0) { return result; }
-        if (const int result = exercise_admission_wait(engine); result != 0) { return result; }
-        if (const int result = exercise_full_prefill_chunk(engine); result != 0) { return result; }
-        if (const int result = exercise_rewrite_checkpoints(engine); result != 0) { return result; }
-        if (const int result = exercise_prefix(engine); result != 0) { return result; }
-        if (const int result = exercise_abandoned_handle_capacity(engine); result != 0) {
-            return result;
+        StallReporter stalls(engine);
+        for (const auto& [step, exercise] : kSharedEngineSteps) {
+            if (!step_selected(step)) continue;
+            trace_step(step);
+            stalls.step(step);
+            if (const int result = exercise(engine); result != 0) { return result; }
         }
     }
-    if (const int result = exercise_rewrite_branch(artifact); result != 0) { return result; }
-    if (const int result = exercise_late_instructions(artifact); result != 0) { return result; }
-    {
-        ninfer::Engine engine(engine_options(artifact));
-        if (const int result = exercise_vision(engine); result != 0) { return result; }
-    }
-    if (const int result = exercise_semantic_captures(artifact); result != 0) { return result; }
-    if (const int result = exercise_host_restore(artifact); result != 0) { return result; }
-    if (const int result = exercise_explicit_prefix(artifact); result != 0) { return result; }
-    if (const int result = exercise_nested_tool_markers(artifact); result != 0) { return result; }
-    if (const int result = exercise_explicit_anchor_branch(artifact); result != 0) {
-        return result;
-    }
-    if (const int result = exercise_concurrent_resource_settlement(artifact); result != 0) {
-        return result;
+    for (const auto& [step, exercise] : kOwnEngineSteps) {
+        if (!step_selected(step)) continue;
+        trace_step(step);
+        if (const int result = exercise(artifact); result != 0) { return result; }
     }
     return 0;
 }
