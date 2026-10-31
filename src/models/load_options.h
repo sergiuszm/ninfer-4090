@@ -11,6 +11,8 @@ struct LoadOptions {
     bool vision                    = false;
     SpeculativeBackend speculative = SpeculativeBackend::None;
     ProposalHead proposal_head     = ProposalHead::Full;
+    // Fork-local (PR #15): models without a groupwise dense body ignore it.
+    PrefillActivations prefill_activations = PrefillActivations::A16;
 
     bool operator==(const LoadOptions&) const = default;
 
@@ -49,10 +51,11 @@ struct LoadOptions {
 }
 
 [[nodiscard]] inline LoadOptions load_options(const EngineOptions& options) noexcept {
-    return {.purpose       = options.purpose,
-            .vision        = options.enable_vision,
-            .speculative   = options.speculative.backend,
-            .proposal_head = options.speculative.proposal_head};
+    return {.purpose             = options.purpose,
+            .vision              = options.enable_vision,
+            .speculative         = options.speculative.backend,
+            .proposal_head       = options.speculative.proposal_head,
+            .prefill_activations = options.prefill_activations};
 }
 
 } // namespace ninfer::models
