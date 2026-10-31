@@ -24,6 +24,11 @@ std::string prefill_signature(const ModelDefinition& model, const moe::Plan* moe
                {"num_hidden_layers", t.num_hidden_layers},
                {"rms_norm_eps", t.rms_norm_eps},
                {"layer_types", t.layer_types}};
+    // Fork-local (PR #15): INT8 dense-body prefill changes the measured prefill cost, so a
+    // preset measured with A16 activations must not apply to it. A16 adds no fact and keeps the
+    // upstream signature.
+    if (model.options().prefill_activations == PrefillActivations::Int8)
+        facts["prefill_activations"] = prefill_activations_name(PrefillActivations::Int8);
     if (moe) {
         auto& execution = facts["moe_execution"];
         execution       = {{"implementation", "eager-fixed-windows-2"},
