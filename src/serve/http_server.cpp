@@ -7,6 +7,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
 #include <chrono>
 #include <exception>
 #include <mutex>
@@ -236,6 +237,7 @@ std::shared_ptr<HttpServer::RequestLifecycle> HttpServer::begin_request(RequestL
 }
 
 void HttpServer::record_request_start(const RequestLogContext& context) {
+    slots_.start(context.id, static_cast<std::uint32_t>(std::max(context.prompt_tokens, 0)));
     request_jsonl_.write_request_start(context);
     operational_log_.request_start(context);
 }
@@ -264,6 +266,7 @@ ninfer::GenerationSchedulingObserver HttpServer::scheduling_observer(std::uint64
 void HttpServer::record_request_done(const RequestLogContext& context,
                                      const GenerationOutcome& outcome) {
     metrics_.done(outcome);
+    slots_.finish(context.id, outcome.stats.reused_prompt_tokens);
     request_jsonl_.write_request_done(context, outcome);
     operational_log_.request_done(context, outcome);
 }
@@ -271,6 +274,7 @@ void HttpServer::record_request_done(const RequestLogContext& context,
 void HttpServer::record_request_failure(const RequestLogContext& context,
                                         const RequestFailure& failure) {
     metrics_.failed(failure.classification == RequestFailureClass::ClientDisconnected);
+    slots_.finish(context.id, std::nullopt);
     request_jsonl_.write_request_error(context, failure.machine_message);
     operational_log_.request_failure(context, failure);
 }
@@ -440,6 +444,11 @@ void HttpServer::register_routes() {
         res.set_content(metrics_.render(stats, service_->is_available()),
                         "text/plain; version=0.0.4; charset=utf-8");
     });
+    // Read-only llama.cpp-shaped slot view; no POST /slots actions (slot persistence is dropped).
+    server_.Get("/slots", [this](const httplib::Request&, httplib::Response& res) {
+        res.set_header("Cache-Control", "no-store");
+        res.set_content(slots_.render(), "application/json");
+    });
     server_.Get(R"(/v1/models/(.+))", [this](const httplib::Request& req, httplib::Response& res) {
         handle_model(req, res);
     });
@@ -521,6 +530,9 @@ void HttpServer::attach(GenerationService& service) {
     service_         = &service;
     metrics_.configure(public_model_id_, service.engine_options(), service.description(),
                        service.startup_report(), service.snapshot());
+    const auto& engine = service.engine_options();
+    slots_.configure(engine.max_concurrency, engine.max_context,
+                     engine.speculative.backend != ninfer::SpeculativeBackend::None);
     request_jsonl_.write_server_start(
         options_, service.engine_options(), service.sampling_defaults(), public_model_id_,
         service.description(), service.startup_report(), service.snapshot());
