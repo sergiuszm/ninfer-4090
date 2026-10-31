@@ -225,12 +225,16 @@ bool proper_prefix(std::string_view marker, std::string_view text) {
     return text.size() < marker.size() && marker.starts_with(text);
 }
 
-// A close counts only after an opener: `</tool_call>` and then `<tool_call>` leaves one open.
+// A close counts only after an opener: `</tool_call>` and then `<tool_call>` leaves one open. A
+// `<tool_call>` opens only when markup follows it; one followed by text is prose naming the tag.
 bool opens_unclosed(std::string_view value, std::string_view open, std::string_view close) {
     std::size_t depth = 0;
     for (auto at = value.find('<'); at != std::string_view::npos; at = value.find('<', at + 1)) {
-        const auto rest = value.substr(at);
-        if (rest.starts_with(open))
+        const auto rest   = value.substr(at);
+        std::size_t after = open.size();
+        if (open == kToolOpen) skip_format_whitespace(rest, after);
+        if (rest.starts_with(open) &&
+            (open != kToolOpen || (after < rest.size() && rest[after] == '<')))
             ++depth;
         else if (depth && rest.starts_with(close))
             --depth;
@@ -562,10 +566,11 @@ public:
             // A committed call replaces the text interpretation of a skipped quoted marker.
             if (skip_reason != FallbackReason::None)
                 diagnostic.fallback_reason = FallbackReason::None;
+            // The first call after a skipped quoted marker exists only through that recovery.
+            call_reason = calls.empty() ? skip_reason : FallbackReason::None;
             calls.push_back({std::string(name), {}, ToolCallStatus::InProgress});
             published     = 0;
             rejections    = 0;
-            call_reason   = FallbackReason::None;
             call_unclosed = false;
             events.emplace_back(ToolCallStart{index(), std::string(name)});
             arguments("{");
