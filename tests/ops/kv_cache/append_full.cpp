@@ -2,6 +2,7 @@
 #include "../../../tools/support/paged_kv_fixture.h"
 #include "kv_cache_storage.h"
 #include "ops/float_codec.h"
+#include "ops/fork_cache_reference.h"
 #include "ops/fp8_cache_reference.h"
 #include "ninfer/ops/kv_cache_append.h"
 #include "cuda_fixture.h"
@@ -9,6 +10,7 @@
 #include "ops/op_tester.h"
 #include "core/decode_graph.h"
 #include "core/device.h"
+#include "core/paged_kv_storage.h"
 
 #include <cuda_runtime.h>
 
@@ -69,6 +71,17 @@ TestCacheLayout test_cache_layout(KvCacheStorage storage) {
     case KvCacheStorage::Fp8KeyNvfp4Value:
         return {{DType::FP8_E4M3FN, kFullHeadDim, DType::U8, kFullFp8Groups},
                 {DType::U8, kFullNvfp4CodeBytes, DType::U8, kFullNvfp4Groups}};
+    // Fork-local (rtx4090-port): G64 FP16 scales; INT8, INT4/E8-lattice or E8-root key codes.
+    case KvCacheStorage::RotatedInt8KeyInt4ValueGroup64:
+        return {{DType::I8, kFullHeadDim, DType::FP16, kFullGroups},
+                {DType::U8, kFullHeadDim / 2, DType::FP16, kFullGroups}};
+    case KvCacheStorage::RotatedInt4KeyInt4ValueGroup64:
+    case KvCacheStorage::RK4V4E8:
+        return {{DType::U8, kFullHeadDim / 2, DType::FP16, kFullGroups},
+                {DType::U8, kFullHeadDim / 2, DType::FP16, kFullGroups}};
+    case KvCacheStorage::RK2V4E8:
+        return {{DType::U8, kFullHeadDim / 4, DType::FP16, kFullGroups},
+                {DType::U8, kFullHeadDim / 2, DType::FP16, kFullGroups}};
     }
     throw std::invalid_argument("unsupported test KV storage");
 }
@@ -250,6 +263,83 @@ void encode_full_group(const std::vector<float>& source, std::size_t source_base
     }
     scales[full_cache_index(kFullGroups, group, head, position, physical_page, kv_heads)] =
         scale_bits;
+}
+
+// Fork-local (rtx4090-port): one encoded fork vector from the shared host codec. For rk2v4-e8
+// keys, `ambiguous` marks the E8 root blocks whose device code may differ from the host one
+// (fork_e8_root_ambiguous_blocks).
+struct ForkEncodedVector {
+    std::array<std::uint8_t, kFullHeadDim> codes{};
+    std::array<std::uint16_t, kFullGroups> scales{};
+    std::uint32_t ambiguous = 0;
+};
+
+ForkEncodedVector encode_fork_vector(const float* values, KvCacheStorage storage, bool key) {
+    ForkEncodedVector encoded;
+    const ForkVectorCodec codec = fork_vector_codec(storage, key);
+    fork_encode_row(values, codec, encoded.codes.data(), encoded.scales.data());
+    if (codec == ForkVectorCodec::E8Root) encoded.ambiguous = fork_e8_root_ambiguous_blocks(values);
+    return encoded;
+}
+
+// An rk2v4-e8 key row with ambiguous E8 root blocks. The expected plane holds the host codes; the
+// device codes of those blocks replace them once they are admissible for the input row.
+struct AmbiguousKeyRow {
+    std::size_t offset;
+    std::array<float, kFullHeadDim> input;
+    std::uint32_t blocks;
+};
+
+AmbiguousKeyRow ambiguous_key_row(std::size_t offset, const float* input, std::uint32_t blocks) {
+    AmbiguousKeyRow row{offset, {}, blocks};
+    std::copy_n(input, kFullHeadDim, row.input.begin());
+    return row;
+}
+
+// Writes the expected record bytes of one appended fork row into byte planes [K, V, KS, VS].
+void store_fork_row(KvCacheStorage storage, const TestCacheLayout& layout, const float* k,
+                    const float* v, int head, int position, int page, int kv_heads,
+                    std::array<std::vector<std::uint8_t>, 4>& planes,
+                    std::vector<AmbiguousKeyRow>& ambiguous_rows) {
+    for (int side = 0; side < 2; ++side) {
+        const auto& vector = side == 0 ? layout.key : layout.value;
+        const auto encoded = encode_fork_vector(side == 0 ? k : v, storage, side == 0);
+        const auto code_offset =
+            full_cache_index(vector.code_extent, 0, head, position, page, kv_heads) *
+            dtype_size(vector.code_dtype);
+        std::copy_n(encoded.codes.begin(), vector.code_extent * dtype_size(vector.code_dtype),
+                    planes[side].begin() + static_cast<std::ptrdiff_t>(code_offset));
+        if (encoded.ambiguous)
+            ambiguous_rows.push_back(ambiguous_key_row(code_offset, k, encoded.ambiguous));
+        const auto scale_offset =
+            full_cache_index(vector.scale_extent, 0, head, position, page, kv_heads) *
+            sizeof(std::uint16_t);
+        std::memcpy(planes[side + 2].data() + scale_offset, encoded.scales.data(),
+                    sizeof(encoded.scales));
+    }
+}
+
+// Adopts the admissible device codes of ambiguous E8 root blocks, so the exact plane comparison
+// checks every other key byte against the host codec.
+int adopt_ambiguous_key_blocks(const std::string& label, const std::vector<std::uint8_t>& actual,
+                               std::vector<std::uint8_t>& expected,
+                               std::span<const AmbiguousKeyRow> rows) {
+    int failures = 0;
+    for (const auto& row : rows) {
+        const std::uint8_t* codes = actual.data() + row.offset;
+        if (!fork_e8_root_blocks_admissible(row.input.data(), codes, row.blocks)) {
+            std::cerr << label << ": E8 root key row at byte " << row.offset
+                      << " holds a code the codec cannot choose\n";
+            ++failures;
+            continue;
+        }
+        for (int block = 0; block < kFullHeadDim / 8; ++block) {
+            if (!(row.blocks & (1u << block))) continue;
+            expected[row.offset + 2 * block]     = codes[2 * block];
+            expected[row.offset + 2 * block + 1] = codes[2 * block + 1];
+        }
+    }
+    return failures;
 }
 
 class FullCacheFixture {
@@ -585,6 +675,44 @@ int full_append_case(int kv_heads, KvCacheStorage storage, int tokens = 3) {
                                  expected_scale_v);
         failures += scale_k.verify_guards((label + " k scale guards").c_str());
         failures += scale_v.verify_guards((label + " v scale guards").c_str());
+    } else if (kv_storage_is_fork_mode(storage)) {
+        std::array<GuardedDeviceBuffer*, 4> buffers{&cache_k, &cache_v, &scale_k, &scale_v};
+        std::array<std::vector<std::uint8_t>, 4> expected{
+            std::vector<std::uint8_t>(k_code_count * dtype_size(layout.key.code_dtype), 0x55U),
+            std::vector<std::uint8_t>(v_code_count * dtype_size(layout.value.code_dtype), 0xaaU),
+            std::vector<std::uint8_t>(k_scale_count * sizeof(std::uint16_t), 0x31U),
+            std::vector<std::uint8_t>(v_scale_count * sizeof(std::uint16_t), 0x42U)};
+        for (int plane = 0; plane < 4; ++plane)
+            buffers[plane]->copy_from_host(expected[plane].data(), expected[plane].size());
+        std::vector<AmbiguousKeyRow> ambiguous_rows;
+        for (int token = 0; token < tokens; ++token) {
+            const int position = positions[static_cast<std::size_t>(token)];
+            const int page     = mapping[static_cast<std::size_t>(position / kPage)];
+            for (int head = 0; head < kv_heads; ++head) {
+                const auto source = full_input_index(0, head, token, kv_heads);
+                store_fork_row(storage, layout, &host_k[source], &host_v[source], head, position,
+                               page, kv_heads, expected, ambiguous_rows);
+            }
+        }
+        fixture.upload();
+        ops::kv_cache_append(k, v, position_tensor, cache,
+                             ninfer::test::cuda_environment().default_execution);
+        cuda_synchronize();
+        fixture.copy_back();
+        const std::string label = "kv_cache_append full " +
+                                  std::string(kv_cache_storage_name(storage)) +
+                                  " Hkv=" + std::to_string(kv_heads) + " T=" +
+                                  std::to_string(tokens) + " P=" + std::to_string(first_position);
+        for (int plane = 0; plane < 4; ++plane) {
+            const auto actual = from_device<std::uint8_t>(buffers[plane]->data(),
+                                                          expected[plane].size());
+            if (plane == 0)
+                failures += adopt_ambiguous_key_blocks(label, actual, expected[0], ambiguous_rows);
+            const auto plane_label = label + " plane=" + std::to_string(plane);
+            failures += verify_exact(plane_label.c_str(), actual, expected[plane]);
+        }
+        failures += scale_k.verify_guards((label + " k scale guards").c_str());
+        failures += scale_v.verify_guards((label + " v scale guards").c_str());
     } else {
         std::vector<std::uint8_t> expected_k(k_code_count, 0x55U);
         std::vector<std::uint8_t> expected_v(v_code_count, 0xaaU);
@@ -655,6 +783,7 @@ int full_append_case(int kv_heads, KvCacheStorage storage, int tokens = 3) {
 struct EncodedVector {
     std::array<std::uint8_t, 512> data{};
     std::array<std::uint8_t, 32> scales{};
+    std::uint32_t ambiguous = 0; // Fork rk2v4-e8 keys: see ForkEncodedVector.
 };
 
 EncodedVector encode_prefix_vector(std::span<const std::uint16_t, kFullHeadDim> input,
@@ -670,6 +799,13 @@ EncodedVector encode_prefix_vector(std::span<const std::uint16_t, kFullHeadDim> 
     }
     std::array<float, kFullHeadDim> values;
     for (int d = 0; d < kFullHeadDim; ++d) values[d] = bf16_to_f32(input[d]);
+    if (kv_storage_is_fork_mode(storage)) {
+        const auto fork = encode_fork_vector(values.data(), storage, key);
+        std::copy(fork.codes.begin(), fork.codes.end(), encoded.data.begin());
+        std::memcpy(encoded.scales.data(), fork.scales.data(), sizeof(fork.scales));
+        encoded.ambiguous = fork.ambiguous;
+        return encoded;
+    }
     if (key || storage == KvCacheStorage::Nvfp4Group16 ||
         storage == KvCacheStorage::Fp8KeyNvfp4Value)
         normalized_hadamard_d256_host(values);
@@ -724,9 +860,14 @@ EncodedVector encode_prefix_vector(std::span<const std::uint16_t, kFullHeadDim> 
     return encoded;
 }
 
+// Row b of pass p appends at positions 61 + p + 71 b + token, so rows start on different pages and
+// page offsets; a writer that takes another row's positions misplaces bytes. A row with no tokens
+// carries -1 positions and table row in pass 0, and valid metadata of an otherwise unused table
+// row in passes 1 and 2, so a writer that uses it writes bytes the exact comparison catches.
 int full_prefix_case(int kv_heads, KvCacheStorage storage, int width, int batch, bool captured) {
+    constexpr int kRowStride = kPage + 7;
     const auto layout        = test_cache_layout(storage);
-    const int logical_pages  = (width + 70 + kPage - 1) / kPage;
+    const int logical_pages  = (width + 70 + kRowStride * (batch - 1) + kPage - 1) / kPage;
     const int table_rows     = batch + 1;
     const int physical_pages = 2 * logical_pages * table_rows + 1;
     const auto input_count   = static_cast<std::size_t>(kFullHeadDim) * kv_heads * width * batch;
@@ -736,6 +877,13 @@ int full_prefix_case(int kv_heads, KvCacheStorage storage, int width, int batch,
             f32_to_bf16(static_cast<float>(static_cast<int>((i * 37 + 19) % 257) - 128) / 64);
         input_v[i] =
             f32_to_bf16(static_cast<float>(static_cast<int>((i * 13 + 5) % 251) - 125) / 32);
+    }
+    if (storage == KvCacheStorage::RK2V4E8) {
+        // Fork-local: the arithmetic pattern ties most E8 root decisions exactly, which leaves
+        // only the admissibility check for those blocks; uniform keys tie about 3% of them.
+        std::vector<float> keys(input_count);
+        fill_uniform(keys, 0x2468au + static_cast<std::uint32_t>(kv_heads), -2.0f, 2.0f);
+        for (std::size_t i = 0; i < input_count; ++i) input_k[i] = f32_to_bf16(keys[i]);
     }
     std::fill_n(input_k.begin(), kFullHeadDim, std::uint16_t{0});
     std::vector<std::int32_t> counts(batch), rows(batch), positions(width * batch);
@@ -783,17 +931,20 @@ int full_prefix_case(int kv_heads, KvCacheStorage storage, int width, int batch,
     int failures = 0;
     for (int pass = 0; pass < 3; ++pass) {
         std::array<std::vector<std::uint8_t>, 4> expected;
+        std::vector<AmbiguousKeyRow> ambiguous_rows;
         for (int plane = 0; plane < 4; ++plane) {
             expected[plane].assign(sizes[plane], static_cast<std::uint8_t>(0xa5 + plane));
             if (sizes[plane])
                 storage_buffers[plane].copy_from_host(expected[plane].data(), sizes[plane]);
         }
         for (int row = 0; row < batch; ++row) {
-            const int kind = (row + pass) % 4;
-            counts[row]    = kind == 0 ? 0 : kind == 1 ? 1 : kind == 2 ? width - 2 : width;
-            rows[row]      = counts[row] == 0 ? -1 : (batch - row + pass) % table_rows;
+            const int kind     = (row + pass) % 4;
+            counts[row]        = kind == 0 ? 0 : kind == 1 ? 1 : kind == 2 ? width - 2 : width;
+            const bool invalid = counts[row] == 0 && pass == 0;
+            rows[row]          = invalid ? -1 : (batch - row + pass) % table_rows;
             for (int token = 0; token < width; ++token)
-                positions[row * width + token] = counts[row] == 0 ? -1 : 61 + pass + token;
+                positions[row * width + token] =
+                    invalid ? -1 : 61 + pass + kRowStride * row + token;
             for (int token = 0; token < counts[row]; ++token) {
                 const int position = positions[row * width + token];
                 const int page     = mapping[rows[row] * logical_pages + position / kPage];
@@ -812,6 +963,13 @@ int full_prefix_case(int kv_heads, KvCacheStorage storage, int width, int batch,
                         const auto code_bytes = vector.code_extent * dtype_size(vector.code_dtype);
                         std::copy_n(encoded.data.begin(), code_bytes,
                                     expected[side].begin() + code_offset);
+                        if (encoded.ambiguous) {
+                            std::array<float, kFullHeadDim> values;
+                            for (int d = 0; d < kFullHeadDim; ++d)
+                                values[d] = bf16_to_f32(input[source + d]);
+                            ambiguous_rows.push_back(
+                                ambiguous_key_row(code_offset, values.data(), encoded.ambiguous));
+                        }
                         if (vector.scale_extent) {
                             const auto scale_offset = full_cache_index(vector.scale_extent, 0, head,
                                                                        position, page, kv_heads) *
@@ -839,12 +997,13 @@ int full_prefix_case(int kv_heads, KvCacheStorage storage, int width, int batch,
         for (int plane = 0; plane < 4; ++plane) {
             if (!sizes[plane]) continue;
             const auto label = "D256 prefix " + std::string(kv_cache_storage_name(storage)) +
-                               " Hkv=" + std::to_string(kv_heads) +
+                               " Hkv=" + std::to_string(kv_heads) + " B=" + std::to_string(batch) +
                                " pass=" + std::to_string(pass) + " plane=" + std::to_string(plane);
-            failures +=
-                verify_exact(label.c_str(),
-                             from_device<std::uint8_t>(storage_buffers[plane].data(), sizes[plane]),
-                             expected[plane]);
+            const auto actual =
+                from_device<std::uint8_t>(storage_buffers[plane].data(), sizes[plane]);
+            if (plane == 0)
+                failures += adopt_ambiguous_key_blocks(label, actual, expected[0], ambiguous_rows);
+            failures += verify_exact(label.c_str(), actual, expected[plane]);
             failures += storage_buffers[plane].verify_guards(label.c_str());
         }
     }
@@ -865,9 +1024,12 @@ int full_prefix_case(int kv_heads, KvCacheStorage storage, int width, int batch,
 } // namespace
 
 void add_full_append_cases(ninfer::test::OpSuite& suite) {
-    for (auto storage : {KvCacheStorage::BFloat16, KvCacheStorage::Int8Group64,
-                         KvCacheStorage::Fp8E4m3fnGroup128Ue8m0, KvCacheStorage::Nvfp4Group16,
-                         KvCacheStorage::Fp8KeyNvfp4Value}) {
+    for (auto storage :
+         {KvCacheStorage::BFloat16, KvCacheStorage::Int8Group64,
+          KvCacheStorage::Fp8E4m3fnGroup128Ue8m0, KvCacheStorage::Nvfp4Group16,
+          KvCacheStorage::Fp8KeyNvfp4Value, KvCacheStorage::RotatedInt8KeyInt4ValueGroup64,
+          KvCacheStorage::RotatedInt4KeyInt4ValueGroup64, KvCacheStorage::RK4V4E8,
+          KvCacheStorage::RK2V4E8}) {
         if (!kv_cache_storage_runs_on_target(storage)) continue;
         const std::string format = kv_cache_storage_name(storage);
         for (int heads : {4, 2})
@@ -884,6 +1046,12 @@ void add_full_append_cases(ninfer::test::OpSuite& suite) {
             suite.add(base + "/w129",
                       [=] { return full_prefix_case(heads, storage, 129, 1, false); },
                       {{"format", format}, {"execution", "eager"}});
+            // Fork-local: MTP history at the production shape (C=2, MTP3) reaches the fork
+            // writer with B>1 through this prefix entry.
+            if (kv_storage_is_fork_mode(storage))
+                suite.add(base + "/b2-w4-graph",
+                          [=] { return full_prefix_case(heads, storage, 4, 2, true); },
+                          {{"format", format}, {"execution", "graph"}});
         }
     }
 }

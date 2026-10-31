@@ -1,4 +1,5 @@
 #include "fixture.h"
+#include "ops/fork_cache_reference.h"
 #include "ops/fp8_cache_reference.h"
 
 namespace ninfer::test::causal_attention {
@@ -19,6 +20,19 @@ TestCacheLayout test_cache_layout(KvCacheStorage storage) {
     case KvCacheStorage::Fp8KeyNvfp4Value:
         return {{DType::FP8_E4M3FN, kHeadDim, DType::U8, kFp8QuantGroups},
                 {DType::U8, kNvfp4CodeBytes, DType::U8, kNvfp4QuantGroups}};
+    // Fork-local: G64 FP16 scales; INT8, INT4 / E8 lattice or E8 root keys and INT4 values.
+    case KvCacheStorage::RotatedInt8KeyInt4ValueGroup64:
+        return {{DType::I8, kHeadDim, DType::FP16, kQuantGroups},
+                {DType::U8, kI4CodeBytes, DType::FP16, kQuantGroups}};
+    case KvCacheStorage::RotatedInt4KeyInt4ValueGroup64:
+    case KvCacheStorage::RK4V4E8:
+        return {{DType::U8, kI4CodeBytes, DType::FP16, kQuantGroups},
+                {DType::U8, kI4CodeBytes, DType::FP16, kQuantGroups}};
+    case KvCacheStorage::RK2V4E8:
+        return {{DType::U8, kHeadDim / 4, DType::FP16, kQuantGroups},
+                {DType::U8, kI4CodeBytes, DType::FP16, kQuantGroups}};
+    default:
+        break;
     }
     throw std::invalid_argument("unsupported test KV storage");
 }
@@ -320,6 +334,19 @@ void encode_rotated_key_row(std::span<const float> source, std::size_t source_ba
     }
 }
 
+namespace {
+
+// Fork-local row through the shared fork host codec (ops/fork_cache_reference.h).
+void encode_fork_row(KvCacheStorage storage, std::span<const float> source,
+                     std::size_t source_base, bool key, std::vector<std::uint8_t>& codes,
+                     std::size_t code_base, std::vector<std::uint16_t>& scales,
+                     std::size_t scale_base) {
+    fork_encode_row(source.data() + source_base, fork_vector_codec(storage, key),
+                    codes.data() + code_base, scales.data() + scale_base);
+}
+
+} // namespace
+
 HostCache make_cache(const Geometry& geometry, KvCacheStorage storage, std::int32_t max_context,
                      std::uint32_t seed, float qk_amplitude) {
     const std::int32_t logical_capacity = align_up_page(max_context);
@@ -408,6 +435,36 @@ HostCache make_cache(const Geometry& geometry, KvCacheStorage storage, std::int3
                                                        cache.v_nvfp4_scale, v_scale);
                           }
                       });
+        return cache;
+    }
+
+    if (kv_storage_is_fork_mode(storage)) {
+        const TestCacheLayout layout = test_cache_layout(storage);
+        const std::size_t rows = static_cast<std::size_t>(logical_capacity) * geometry.kv_heads;
+        cache.k_fork.assign(static_cast<std::size_t>(layout.key.code_extent) * rows, 0);
+        cache.v_fork.assign(static_cast<std::size_t>(layout.value.code_extent) * rows, 0);
+        cache.k_scale.assign(scale_elements(geometry, logical_capacity), 0);
+        cache.v_scale.assign(scale_elements(geometry, logical_capacity), 0);
+        parallel_rows(
+            geometry.kv_heads * logical_capacity,
+            std::uint64_t(geometry.kv_heads) * logical_capacity * kHeadDim,
+            [&](int first, int last) {
+                for (int row = first; row < last; ++row) {
+                    const int head = row / logical_capacity, position = row % logical_capacity;
+                    const std::size_t source =
+                        cache_index(geometry, logical_capacity, head, position, 0);
+                    const std::size_t k_code = logical_plane_index(
+                        layout.key.code_extent, geometry, logical_capacity, head, position, 0);
+                    const std::size_t v_code = logical_plane_index(
+                        layout.value.code_extent, geometry, logical_capacity, head, position, 0);
+                    const std::size_t scale =
+                        scale_index(geometry, logical_capacity, head, position, 0);
+                    encode_fork_row(storage, logical_k, source, true, cache.k_fork, k_code,
+                                    cache.k_scale, scale);
+                    encode_fork_row(storage, logical_v, source, false, cache.v_fork, v_code,
+                                    cache.v_scale, scale);
+                }
+            });
         return cache;
     }
 
@@ -529,6 +586,20 @@ void append_cache(HostCache& cache, const std::vector<float>& k, const std::vect
                 encode_fp8_row(v_row, cache.v_fp8, target, cache.v_fp8_scale, scale);
                 continue;
             }
+            if (kv_storage_is_fork_mode(cache.storage)) {
+                const TestCacheLayout layout = test_cache_layout(cache.storage);
+                const std::size_t k_code     = logical_plane_index(
+                    layout.key.code_extent, geometry, cache.logical_capacity, head, position, 0);
+                const std::size_t v_code = logical_plane_index(
+                    layout.value.code_extent, geometry, cache.logical_capacity, head, position, 0);
+                const std::size_t scale =
+                    scale_index(geometry, cache.logical_capacity, head, position, 0);
+                encode_fork_row(cache.storage, k, source, true, cache.k_fork, k_code,
+                                cache.k_scale, scale);
+                encode_fork_row(cache.storage, v, source, false, cache.v_fork, v_code,
+                                cache.v_scale, scale);
+                continue;
+            }
             const std::size_t scale =
                 scale_index(geometry, cache.logical_capacity, head, position, 0);
             encode_rotated_key_row(k, source, cache.k_i8, target, cache.k_scale, scale);
@@ -556,6 +627,25 @@ double cache_value(const HostCache& cache, bool key, int head, int position, int
         const auto& scales = key ? cache.k_scale : cache.v_scale;
         return double(codes[index]) *
                double(f16_bits_to_f32(scales[row * kQuantGroups + d / kQuantGroup]));
+    }
+    if (kv_storage_is_fork_mode(cache.storage)) {
+        // Rotated-domain value; ideal_attention applies H64 to Q and to the output.
+        const auto& scales          = key ? cache.k_scale : cache.v_scale;
+        const double scale          = f16_bits_to_f32(scales[row * kQuantGroups + d / kQuantGroup]);
+        const ForkVectorCodec codec = fork_vector_codec(cache.storage, key);
+        const std::uint8_t* codes =
+            (key ? cache.k_fork : cache.v_fork).data() +
+            row * static_cast<std::size_t>(kQuantGroups * fork_group_code_bytes(codec));
+        if (codec == ForkVectorCodec::Int8)
+            return double(static_cast<std::int8_t>(codes[d])) * scale;
+        if (codec == ForkVectorCodec::E8Root) {
+            const int block = d / 8;
+            return double(fork_e8_root_decode({codes[2 * block], codes[2 * block + 1]})[d % 8]) *
+                   scale;
+        }
+        const auto byte     = codes[d / 2];
+        const unsigned code = (d & 1) ? byte >> 4 : byte & 15u;
+        return double(static_cast<int>(code ^ 8u) - 8) * scale;
     }
     if (cache.storage == KvCacheStorage::Fp8E4m3fnGroup128Ue8m0 ||
         (key && cache.storage == KvCacheStorage::Fp8KeyNvfp4Value)) {
@@ -593,6 +683,11 @@ int verify_cache(const std::string& label, const HostCache& got, const HostCache
         failures += verify_exact((label + " cache-v-code").c_str(), got.v_fp8, expected.v_fp8);
         failures +=
             verify_exact((label + " cache-v-scale").c_str(), got.v_fp8_scale, expected.v_fp8_scale);
+    } else if (kv_storage_is_fork_mode(expected.storage)) {
+        failures += verify_exact((label + " cache-k-code").c_str(), got.k_fork, expected.k_fork);
+        failures += verify_exact((label + " cache-k-scale").c_str(), got.k_scale, expected.k_scale);
+        failures += verify_exact((label + " cache-v-code").c_str(), got.v_fork, expected.v_fork);
+        failures += verify_exact((label + " cache-v-scale").c_str(), got.v_scale, expected.v_scale);
     } else if (expected.storage == KvCacheStorage::Fp8KeyNvfp4Value) {
         failures += verify_exact((label + " cache-k-code").c_str(), got.k_fp8, expected.k_fp8);
         failures +=
@@ -652,6 +747,41 @@ void inject_codec_edges(const Geometry& geometry, std::int32_t tokens, std::vect
     }
     k[kv_input_index(geometry, geometry.kv_heads - 1, 0, tokens - 1)] = -1.0f;
     v[kv_input_index(geometry, geometry.kv_heads - 1, 0, tokens - 1)] = 1.0f;
+}
+
+void avoid_codec_ties(KvCacheStorage storage, const Geometry& geometry, std::int32_t tokens,
+                      std::vector<float>& k) {
+    if (storage != KvCacheStorage::RK2V4E8) return;
+    // A rotated group with an ambiguous block gets features 1..63 redrawn until no block is
+    // ambiguous; feature 0 keeps the codec edges of inject_codec_edges. About one uniform group
+    // in four needs a redraw, mostly because a type-A root ties the residual axis exactly.
+    std::uint32_t state = 0x2545f491u;
+    for (std::int32_t token = 0; token < tokens; ++token)
+        for (std::int32_t head = 0; head < geometry.kv_heads; ++head) {
+            float* row = k.data() + kv_input_index(geometry, head, 0, token);
+            float amplitude = 0.0f;
+            for (std::int32_t d = 0; d < kHeadDim; ++d)
+                amplitude = std::max(amplitude, std::abs(row[d]));
+            for (std::int32_t group = 0; group < kQuantGroups; ++group) {
+                float* input = row + group * kQuantGroup;
+                for (int attempt = 0;; ++attempt) {
+                    const ForkRotatedGroup rotated =
+                        fork_rotate_group(input, ForkVectorCodec::E8Root);
+                    bool ambiguous = false;
+                    for (int block = 0; block < kQuantGroup / 8 && !ambiguous; ++block)
+                        ambiguous = fork_e8_root_ambiguous(rotated.x.data() + 8 * block,
+                                                           rotated.scale);
+                    if (!ambiguous) break;
+                    if (attempt == 64)
+                        throw std::logic_error("rk2v4-e8 key group stays ambiguous");
+                    for (std::int32_t d = 1; d < kQuantGroup; ++d) {
+                        state            = state * 1664525u + 1013904223u;
+                        const float unit = static_cast<float>(state >> 8) * 0x1p-24f;
+                        input[d] = bf16_to_f32(f32_to_bf16((2.0f * unit - 1.0f) * amplitude));
+                    }
+                }
+            }
+        }
 }
 
 } // namespace ninfer::test::causal_attention

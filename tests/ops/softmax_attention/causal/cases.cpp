@@ -193,6 +193,11 @@ void add_graph_envelope_cases(OpSuite& suite, KvCacheStorage storage) {
                             MappingPattern::Fragmented, {}, short_limits);
         add_append_case(suite, geometry, storage, {1, 32768, 131072, 966u},
                         MappingPattern::Fragmented, {}, long_limits);
+        // Nine columns cross the 4096-key policy boundary in both directions. The workspace is
+        // planned at 8192 keys and must also cover the replay at 4096 keys.
+        constexpr std::array<std::uint32_t, 4> crossing_limits{2048, 8192, 4096, 8192};
+        add_append_case(suite, geometry, storage, {9, 17, 8192, 968u}, MappingPattern::Fragmented,
+                        {}, crossing_limits);
         BatchAttentionCase replay{16,
                                   {17, 31, 0},
                                   {7, 16, 0},
@@ -365,6 +370,25 @@ void add_k8v4_cases(OpSuite& suite) {
                     {1, 65535, 65536, 814u}, MappingPattern::Fragmented);
 }
 
+// Fork-local rk4v4-e8 (the Qwen3.8 serving cache): decode (T = 1) and DFlash2 d12 verification
+// (T = 13) over long windows, where the split-KV small-T route streams the packed codes.
+void add_rk4v4e8_cases(OpSuite& suite) {
+    constexpr KvCacheStorage storage = KvCacheStorage::RK4V4E8;
+    add_quantized_batch_cases(suite, storage, 901u);
+    for (const Geometry& geometry : kGeometries) {
+        add_cached_case(suite, geometry, storage, {1, 8191, 8192, 906u},
+                        MappingPattern::Fragmented);
+        add_cached_case(suite, geometry, storage, {13, 8179, 8192, 907u},
+                        MappingPattern::Fragmented);
+        add_append_case(suite, geometry, storage, {13, 4083, 4096, 908u, false, true},
+                        MappingPattern::Fragmented);
+    }
+    add_cached_case(suite, kGeometries[0], storage, {1, 131071, 131072, 909u},
+                    MappingPattern::Fragmented);
+    add_cached_case(suite, kGeometries[0], storage, {13, 131059, 131072, 910u},
+                    MappingPattern::Fragmented);
+}
+
 void add_numerical_profile_cases(OpSuite& suite, KvCacheStorage storage) {
     const std::array<int, 4> queries{0, 63, 128, 1023};
     for (const auto& geometry : kGeometries) {
@@ -418,8 +442,11 @@ void add_storage_cases(OpSuite& suite, KvCacheStorage storage) {
     } else if (storage == KvCacheStorage::Fp8KeyNvfp4Value) {
         add_k8v4_cases(suite);
         add_quantized_batch_cases(suite, storage, 815u);
+    } else if (storage == KvCacheStorage::RK4V4E8) {
+        add_rk4v4e8_cases(suite);
     }
-    if (storage == KvCacheStorage::BFloat16 || storage == KvCacheStorage::Int8Group64)
+    if (storage == KvCacheStorage::BFloat16 || storage == KvCacheStorage::Int8Group64 ||
+        kv_storage_is_fork_mode(storage))
         for (const auto& geometry : kGeometries) add_geometry(suite, geometry, storage);
     if (storage != KvCacheStorage::BFloat16) {
         add_quantized_causal_cases(suite, storage);
@@ -444,7 +471,20 @@ void add_storage_cases(OpSuite& suite, KvCacheStorage storage) {
 void add_cases(OpSuite& suite) {
     for (auto storage : {KvCacheStorage::BFloat16, KvCacheStorage::Int8Group64,
                          KvCacheStorage::Fp8E4m3fnGroup128Ue8m0, KvCacheStorage::Nvfp4Group16,
-                         KvCacheStorage::Fp8KeyNvfp4Value})
-        if (kv_cache_storage_runs_on_target(storage)) add_storage_cases(suite, storage);
+                         KvCacheStorage::Fp8KeyNvfp4Value,
+                         KvCacheStorage::RotatedInt8KeyInt4ValueGroup64, KvCacheStorage::RK4V4E8,
+                         KvCacheStorage::RK2V4E8}) {
+        if (kv_cache_storage_runs_on_target(storage)) {
+            add_storage_cases(suite, storage);
+            continue;
+        }
+        // Fork-local (rtx4090-port): a storage this target refuses keeps one declared case, so its
+        // --format run reports a skip (77) instead of an empty selection.
+        const std::string format = kv_cache_storage_name(storage);
+        suite.add(
+            "causal_unsupported/" + format,
+            []() -> int { throw OpTestSkip("KV storage refused on this target"); },
+            {{"format", format}});
+    }
 }
 } // namespace ninfer::test::causal_attention

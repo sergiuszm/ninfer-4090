@@ -75,12 +75,18 @@ struct PagedKVStorageLayout {
         data = DType::FP8_E4M3FN;
         break;
     case KvCacheVectorFormat::Nvfp4Group16Ue4m3:
+    case KvCacheVectorFormat::Int4Group64F16:
+    case KvCacheVectorFormat::E8LatticeGroup64F16:
+    case KvCacheVectorFormat::E8RootGroup64F16:
         data = DType::U8;
         break;
     default:
         throw std::invalid_argument("unknown KV-cache vector format");
     }
-    return {data, info.value_bits == 4 ? dim / 2 : dim,
+    const std::int32_t data_extent = info.value_bits == 4   ? dim / 2
+                                     : info.value_bits == 2 ? dim / 4
+                                                            : dim;
+    return {data, data_extent,
             info.scale == KvCacheScaleFormat::Float16 ? DType::FP16 : DType::U8,
             info.group_size ? dim / info.group_size : 0};
 }
@@ -92,6 +98,52 @@ struct PagedKVStorageLayout {
         throw std::invalid_argument("unsupported paged KV-cache storage geometry");
     return {storage, head_dim, paged_kv_vector_layout(profile.key, head_dim),
             paged_kv_vector_layout(profile.value, head_dim)};
+}
+
+/** Fork-local (rtx4090-port): how a fork storage packs its planes. Kernels dispatch on these
+ *  flags; the storage enum stays the single source of truth for them. */
+struct KvForkModeFlags {
+    bool packed_v   = false;
+    bool rotate_k   = false;
+    bool rotate_v   = false;
+    bool packed_k   = false;
+    bool e8_lattice = false;
+    bool e8_root    = false;
+};
+
+/** Fork-local: the storages served by the fork append path and the causal_cache/e8/ family.
+ *  Upstream Int8Group64 (d256-rotated keys) is not one of them. Ops route on the storage, never
+ *  on a plane's vector format: rk8v4 keys share the Int8Group64F16 layout but are not
+ *  d256-rotated. */
+[[nodiscard]] constexpr bool kv_storage_is_fork_mode(KvCacheStorage storage) noexcept {
+    switch (storage) {
+    case KvCacheStorage::RotatedInt8KeyInt4ValueGroup64:
+    case KvCacheStorage::RotatedInt4KeyInt4ValueGroup64:
+    case KvCacheStorage::RK4V4E8:
+    case KvCacheStorage::RK2V4E8:
+        return true;
+    default:
+        return false;
+    }
+}
+
+[[nodiscard]] constexpr KvForkModeFlags kv_fork_mode_flags(KvCacheStorage storage) noexcept {
+    switch (storage) {
+    case KvCacheStorage::RotatedInt8KeyInt4ValueGroup64:
+        return {.packed_v = true, .rotate_k = true, .rotate_v = true};
+    case KvCacheStorage::RotatedInt4KeyInt4ValueGroup64:
+        return {.packed_v = true, .rotate_k = true, .rotate_v = true, .packed_k = true};
+    case KvCacheStorage::RK4V4E8:
+        return {.packed_v   = true,
+                .rotate_k   = true,
+                .rotate_v   = true,
+                .packed_k   = true,
+                .e8_lattice = true};
+    case KvCacheStorage::RK2V4E8:
+        return {.packed_v = true, .rotate_k = true, .rotate_v = true, .e8_root = true};
+    default:
+        return {};
+    }
 }
 
 } // namespace ninfer

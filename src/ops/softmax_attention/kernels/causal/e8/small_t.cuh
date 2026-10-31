@@ -1,0 +1,246 @@
+#pragma once
+
+// Fork-local (rtx4090-port): split-KV causal small-T attention scaffolding of the
+// causal_cache/e8/ family. The int8 partial kernel lives in small_t_i8.cuh; this header owns the
+// layout helpers and the split reducer.
+
+#include "ops/common/cuda/reduce.cuh"
+#include "ops/common/numeric/math.h"
+#include "ops/softmax_attention/kernels/causal/e8/geometry.h"
+#include "ops/softmax_attention/kernels/causal/operands.h"
+
+#include <cuda_bf16.h>
+#include <math_constants.h>
+
+#include <cstdint>
+
+namespace ninfer::ops::e8 {
+
+using detail::CausalAppendInput;
+using detail::CausalCachedInput;
+using detail::kCausalHeadDim;
+
+template <typename Geometry>
+__device__ __forceinline__ std::int64_t causal_q_index(int q_head, int d, int token = 0) {
+    return static_cast<std::int64_t>(d) + static_cast<std::int64_t>(kCausalHeadDim) *
+                                              (static_cast<std::int64_t>(q_head) +
+                                               static_cast<std::int64_t>(Geometry::QHeads) * token);
+}
+
+template <typename Geometry>
+__device__ __forceinline__ std::int64_t causal_partial_acc_index(int q_head, int d, int token,
+                                                                 int split, int tokens) {
+    return static_cast<std::int64_t>(d) +
+           static_cast<std::int64_t>(kCausalHeadDim) *
+               (static_cast<std::int64_t>(q_head) +
+                static_cast<std::int64_t>(Geometry::QHeads) *
+                    (static_cast<std::int64_t>(token) + static_cast<std::int64_t>(tokens) * split));
+}
+
+template <typename Geometry>
+__device__ __forceinline__ std::int64_t causal_partial_stat_index(int q_head, int token, int split,
+                                                                  int tokens) {
+    return static_cast<std::int64_t>(q_head) +
+           static_cast<std::int64_t>(Geometry::QHeads) *
+               (static_cast<std::int64_t>(token) + static_cast<std::int64_t>(tokens) * split);
+}
+
+template <typename Geometry>
+__device__ __forceinline__ bool causal_valid_q_head(int kv_head, int q_head) {
+    return kv_head >= 0 && kv_head < Geometry::KVHeads && q_head >= kv_head * Geometry::GroupSize &&
+           q_head < (kv_head + 1) * Geometry::GroupSize && q_head < Geometry::QHeads;
+}
+
+template <typename Geometry>
+__device__ __forceinline__ int causal_small_t_default_splits(int window) {
+    int target_keys_per_split = 480 / Geometry::SmallTSplitScale;
+    if (window <= 4096) {
+        target_keys_per_split = 64 / Geometry::SmallTSplitScale;
+    } else if (window <= 8198) {
+        target_keys_per_split = 128 / Geometry::SmallTSplitScale;
+    } else if (window <= 16390) {
+        target_keys_per_split = 256 / Geometry::SmallTSplitScale;
+    }
+    constexpr int kMinSplits = 4 * Geometry::SmallTSplitScale;
+    int splits               = common::div_up(window, target_keys_per_split);
+    splits                   = splits > kMinSplits ? splits : kMinSplits;
+    return splits < Geometry::SmallTMaximumSplits ? splits : Geometry::SmallTMaximumSplits;
+}
+
+// Device-side active-split policy of the int8 partial kernel; e8/plan.cpp bounds it per launch.
+template <typename Geometry>
+__device__ __forceinline__ int causal_small_t_active_splits(int window, int launch_capacity,
+                                                            int tokens) {
+    if (window <= 0) { return launch_capacity; }
+    int splits = 0;
+    if (tokens == 5 && window > 128 && window <= 512) {
+        splits = common::div_up(window, 32 / Geometry::SmallTSplitScale);
+    } else if (tokens >= 6 && window > 128 && window <= 160) {
+        constexpr int kKeysPerSplit = Geometry::SmallTSplitScale == 2 ? 17 : 24;
+        splits                      = common::div_up(window, kKeysPerSplit);
+    } else if (tokens >= 6 && window > 5000 && window <= 8198) {
+        splits             = common::div_up(window, 192 / Geometry::SmallTSplitScale);
+        constexpr int kMin = 4 * Geometry::SmallTSplitScale;
+        constexpr int kMax = 42 * Geometry::SmallTSplitScale;
+        splits             = splits > kMin ? splits : kMin;
+        splits             = splits < kMax ? splits : kMax;
+    } else {
+        splits = causal_small_t_default_splits<Geometry>(window);
+    }
+    return splits < launch_capacity ? splits : launch_capacity;
+}
+
+__device__ __forceinline__ int causal_small_t_tc_swz(int row, int col) {
+    return (((col >> 3) ^ (row & 7)) << 3) | (col & 7);
+}
+
+template <typename Byte>
+__device__ __forceinline__ void causal_small_t_store_byte_swizzled(Byte* tile, int row, int d,
+                                                                   int d_b16_stride, Byte code) {
+    const int col_b16 = d >> 1;
+    const int byte    = d & 1;
+    const int off     = (row * d_b16_stride + causal_small_t_tc_swz(row, col_b16)) * 2 + byte;
+    tile[off]         = code;
+}
+
+__device__ __forceinline__ int causal_small_t_tc_swz32(int row, int col) {
+    return (((col >> 3) ^ (row & 3)) << 3) | (col & 7);
+}
+
+// Signed int8 QK MMA, k=32 contraction. A = 16x32 s8 (4 regs/thread, 4 s8 each),
+// B = 8x32 s8 col-major (2 regs/thread), D = 16x8 s32 (4 regs/thread). The A/B
+// register byte layout is identical to the m16n8k16 bf16 fragments loaded by
+// ldmatrix_x4/x2 over a d-contiguous int8 tile reinterpreted as
+// b16 (two packed int8 per 16-bit lane), so the same ldmatrix helpers and XOR
+// swizzle feed this MMA. The s32 accumulator layout matches the bf16 f32
+// accumulator (c0/c1 -> row groupID, c2/c3 -> row groupID+8), so score
+// consumption is unchanged; only per-64-group scale rescale differs.
+template <typename Geometry>
+__device__ __forceinline__ void causal_small_t_tc_row_to_qt(int row, int tokens, int kv_head,
+                                                            int& q_head, int& token) {
+    token             = row / Geometry::GroupSize;
+    const int local_q = row - token * Geometry::GroupSize;
+    q_head            = kv_head * Geometry::GroupSize + local_q;
+}
+
+// Merge one query/head's split statistics once per CTA. Published scalars are separate
+// from the reduction/weight storage, so later writes cannot race another warp's scalar read.
+template <class Geometry>
+__device__ __forceinline__ float
+causal_merge_split_statistics(const float* partial_m, const float* partial_l, int q_head, int token,
+                              int tokens, int splits, float* weights, float* warp_sums,
+                              float* scalars) {
+    static_assert(Geometry::SmallTMaximumSplits <= 256);
+    const int tid = threadIdx.x, lane = tid & 31, warp = tid >> 5;
+    const auto index   = causal_partial_stat_index<Geometry>(q_head, token, tid, tokens);
+    const float m      = tid < splits ? partial_m[index] : -CUDART_INF_F;
+    const float warp_m = common::warp_max(m);
+    if (lane == 0) warp_sums[warp] = warp_m;
+    __syncthreads();
+    if (warp == 0) {
+        const float maximum = common::warp_max(tid < 8 ? warp_sums[tid] : -CUDART_INF_F);
+        if (tid == 0) scalars[0] = maximum;
+    }
+    __syncthreads();
+    const float maximum     = scalars[0];
+    const float l           = tid < splits ? partial_l[index] : 0.0f;
+    const float weight      = l > 0.0f && maximum > -CUDART_INF_F ? expf(m - maximum) : 0.0f;
+    const float denominator = common::block_reduce_sum<256>(l * weight, warp_sums);
+    if (tid == 0) scalars[1] = denominator;
+    __syncthreads();
+    const float total = scalars[1];
+    if (tid < splits) weights[tid] = total > 0.0f ? weight : 0.0f;
+    __syncthreads();
+    return total;
+}
+
+// The cache stores V rotated by the normalized H64 per 64-dimension group, so the merged FP32
+// output is rotated back here, before its only BF16 rounding.
+template <typename Geometry, int DChunk, bool MultiBatch, bool Masked, bool Offset>
+__launch_bounds__(256) __global__ void causal_attention_small_t_reduce_output_kernel(
+    const float* partial_acc, const float* partial_m, const float* partial_l,
+    const std::int32_t* positions, const std::int32_t* valid_columns, std::int32_t tokens,
+    std::int32_t full_width, std::int32_t column_begin, std::int32_t batch_size,
+    std::int32_t split_count, __nv_bfloat16* out) {
+    static_assert(DChunk > 0 && DChunk <= kCausalHeadDim);
+    static_assert(DChunk % 64 == 0, "a rotated output chunk holds whole groups");
+
+    const int q_head      = static_cast<int>(blockIdx.x);
+    const int d_start     = static_cast<int>(blockIdx.y) * DChunk;
+    const int flat_column = static_cast<int>(blockIdx.z);
+    int batch             = 0;
+    int token             = flat_column;
+    if constexpr (MultiBatch) {
+        batch = flat_column / tokens;
+        token = flat_column - batch * tokens;
+    }
+    const int tid = threadIdx.x;
+    if (q_head >= Geometry::QHeads || token >= tokens) { return; }
+    if constexpr (MultiBatch) {
+        if (batch >= batch_size) { return; }
+    }
+
+    if constexpr (Offset) { positions += column_begin; }
+    if constexpr (MultiBatch) { positions += batch * full_width; }
+    const int last_pos = positions[tokens - 1];
+    int output_column  = token;
+    if constexpr (Offset) { output_column += column_begin; }
+    if constexpr (MultiBatch) { output_column += batch * full_width; }
+    if constexpr (Masked) {
+        const int absolute_column = token + (Offset ? column_begin : 0);
+        if (absolute_column >= valid_columns[batch]) {
+            if (tid < DChunk && d_start + tid < kCausalHeadDim)
+                out[causal_q_index<Geometry>(q_head, d_start + tid, output_column)] =
+                    __float2bfloat16(0.0f);
+            return;
+        }
+    }
+
+    if constexpr (MultiBatch) {
+        const std::int64_t partial_acc_row = static_cast<std::int64_t>(batch) * kCausalHeadDim *
+                                             Geometry::QHeads * tokens * split_count;
+        const std::int64_t partial_stat_row =
+            static_cast<std::int64_t>(batch) * Geometry::QHeads * tokens * split_count;
+        partial_acc += partial_acc_row;
+        partial_m += partial_stat_row;
+        partial_l += partial_stat_row;
+    }
+
+    const int window = last_pos + 1;
+    const int active_split_count =
+        causal_small_t_active_splits<Geometry>(window, split_count, tokens);
+
+    __shared__ float weights[256], warp_sums[8], scalars[2];
+    const float head_l =
+        causal_merge_split_statistics<Geometry>(partial_m, partial_l, q_head, token, tokens,
+                                                active_split_count, weights, warp_sums, scalars);
+    const int d       = d_start + tid;
+    const bool active = tid < DChunk && d < kCausalHeadDim;
+    float numerator   = 0.0f;
+    if (active) {
+        for (int split = 0; split < active_split_count; ++split) {
+            if (weights[split] != 0.0f)
+                numerator += partial_acc[causal_partial_acc_index<Geometry>(q_head, d, token, split,
+                                                                           tokens)] *
+                             weights[split];
+        }
+    }
+
+    float value = (head_l > 0.0f) ? numerator / head_l : 0.0f;
+    // Lanes carry in-group bits 0-4 and the warp parity carries bit 5 (DChunk % 64 == 0).
+    __shared__ float half_s[256];
+    const int lane = tid & 31;
+#pragma unroll
+    for (int offset = 1; offset < 32; offset <<= 1) {
+        const float other = __shfl_xor_sync(0xffffffffu, value, offset);
+        value             = (lane & offset) ? other - value : value + other;
+    }
+    half_s[tid] = value;
+    __syncthreads();
+    const float other = half_s[tid ^ 32];
+    value             = (tid & 32) ? (other - value) * 0.125f : (value + other) * 0.125f;
+    if (!active) return;
+    out[causal_q_index<Geometry>(q_head, d, output_column)] = __float2bfloat16(value);
+}
+
+} // namespace ninfer::ops::e8

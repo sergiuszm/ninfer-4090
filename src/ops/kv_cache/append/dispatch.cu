@@ -1,7 +1,9 @@
 #include "ops/kv_cache/append/dispatch.h"
 #include "core/device.h"
+#include "core/paged_kv_storage.h"
 #include "ops/common/host/operands.h"
 #include "ops/kv_cache/append/prefix.cuh"
+#include "ops/kv_cache/kernels/fork_write.h"
 #include "ops/kv_cache/kernels/write.h"
 
 namespace ninfer::ops::detail {
@@ -36,6 +38,12 @@ void launch_cyclic(const Tensor& k, const Tensor& v, const Tensor& positions, co
 
 void kv_cache_append_dispatch(const Tensor& k, const Tensor& v, const Tensor& positions,
                               PagedKVLayerView cache, cudaStream_t stream) {
+    // Fork-local (rtx4090-port): route on the storage profile, never on a plane's vector format.
+    // rk8v4 keys share the Int8Group64F16 layout but are not D256-rotated.
+    if (kv_storage_is_fork_mode(cache.storage)) {
+        kv::launch_fork_write(k, v, positions, cache, stream);
+        return;
+    }
     kv::launch_paged_write(select_append(cache.storage, k.ne[1], k.ne[2]), k, v, positions, cache,
                            stream);
 }
@@ -47,6 +55,10 @@ void kv_cache_append_prefix_dispatch(const Tensor& k, const Tensor& v, const Ten
                                      cudaStream_t stream) {
     if (envelope.max_count == 0) return;
     if (cache.head_dim == 256) {
+        if (kv_storage_is_fork_mode(cache.storage)) {
+            kv::launch_fork_write(k, v, positions, counts, table_rows, cache, stream);
+            return;
+        }
         kv::launch_paged_write(kv::PagedWriteInstance::BatchRows256, k, v, positions, counts,
                                table_rows, cache, stream);
         return;

@@ -581,7 +581,16 @@ int main(int argc, char** argv) {
     for (auto storage : {KvCacheStorage::BFloat16, KvCacheStorage::Int8Group64,
                          KvCacheStorage::Fp8E4m3fnGroup128Ue8m0, KvCacheStorage::Nvfp4Group16,
                          KvCacheStorage::Fp8KeyNvfp4Value}) {
-        if (!kv_cache_storage_runs_on_target(storage)) continue;
+        if (!kv_cache_storage_runs_on_target(storage)) {
+            // Fork-local (rtx4090-port): a storage this target refuses keeps one declared case, so
+            // its --format run reports a skip (77) instead of an empty selection.
+            const std::string format = kv_cache_storage_name(storage);
+            suite.add(
+                "sparse_gqa_unsupported/" + format,
+                []() -> int { throw OpTestSkip("KV storage refused on this target"); },
+                {{"format", format}});
+            continue;
+        }
         add_cases(suite, storage);
         add_local_cases(suite, storage);
     }

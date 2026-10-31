@@ -26,6 +26,7 @@
 #include <filesystem>
 #include <fstream>
 #include <limits>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -42,7 +43,6 @@ constexpr std::size_t kFlushBytes = std::size_t{256} << 20;
 
 enum class Entry : std::uint8_t { Append, Cached, Both };
 enum class GeometryChoice : std::uint8_t { H24Kv4, H16Kv2, All };
-enum class KvChoice : std::uint8_t { Bf16, Int8, Fp8, Nvfp4, K8V4, All };
 enum class Execution : std::uint8_t { Eager, Graph, Both };
 enum class CacheMode : std::uint8_t { Cold, Warm, Both };
 enum class CacheState : std::uint8_t { Cold, Warm };
@@ -60,7 +60,7 @@ constexpr Geometry kH16Kv2{"d256-h16-kv2", 16, 2};
 struct Options {
     Entry entry             = Entry::Both;
     GeometryChoice geometry = GeometryChoice::All;
-    KvChoice kv             = KvChoice::All;
+    std::optional<KvCacheStorage> kv; // Empty: all upstream profiles.
     Execution execution     = Execution::Graph;
     CacheMode cache         = CacheMode::Cold;
     PageMapping mapping     = PageMapping::Identity;
@@ -112,7 +112,8 @@ struct Result {
                  "usage: ninfer_causal_softmax_attention_bench "
                  "[--entry append|cached|both] "
                  "[--geometry d256-h24-kv4|d256-h16-kv2|all] "
-                 "[--kv-dtype bf16|int8|fp8|nvfp4|k8v4|all] [--batch B,...] [--tokens W,...] "
+                 "[--kv-dtype bf16|int8|fp8|nvfp4|k8v4|rk8v4|rk4v4|rk4v4-e8|rk2v4-e8|all] "
+                 "[--batch B,...] [--tokens W,...] "
                  "[--context L,...] [--row-contexts L0,...] [--valid-columns V0,...] "
                  "[--table-rows R0,...] "
                  "[--envelope-max N] "
@@ -182,20 +183,15 @@ Options parse_options(int argc, char** argv) {
                 usage("--geometry expects d256-h24-kv4, d256-h16-kv2, or all");
         } else if (argument == "--kv-dtype") {
             const std::string_view value(next("--kv-dtype requires a value"));
-            if (value == "bf16")
-                options.kv = KvChoice::Bf16;
-            else if (value == "int8")
-                options.kv = KvChoice::Int8;
-            else if (value == "fp8")
-                options.kv = KvChoice::Fp8;
-            else if (value == "nvfp4")
-                options.kv = KvChoice::Nvfp4;
-            else if (value == "k8v4")
-                options.kv = KvChoice::K8V4;
-            else if (value == "all")
-                options.kv = KvChoice::All;
-            else
-                usage("--kv-dtype expects bf16, int8, fp8, nvfp4, k8v4, or all");
+            if (value == "all") {
+                options.kv.reset();
+            } else {
+                try {
+                    options.kv = kv_cache_storage_from_option(value);
+                } catch (const std::invalid_argument&) {
+                    usage("--kv-dtype expects a KV-cache dtype name or all");
+                }
+            }
         } else if (argument == "--tokens") {
             options.tokens = parse_list(next("--tokens requires a value"), 1, 262144, "--tokens");
         } else if (argument == "--batch") {
@@ -311,7 +307,7 @@ Options parse_options(int argc, char** argv) {
     }
     if (options.profile &&
         (options.entry == Entry::Both || options.geometry == GeometryChoice::All ||
-         options.kv == KvChoice::All || options.batches.size() != 1 || options.tokens.size() != 1 ||
+         !options.kv || options.batches.size() != 1 || options.tokens.size() != 1 ||
          (options.row_contexts.empty() && options.contexts.size() != 1) ||
          options.execution == Execution::Both || options.cache == CacheMode::Both)) {
         usage("--profile requires one entry, geometry, dtype, B, W, row profile, execution, and "
@@ -767,12 +763,8 @@ std::vector<Geometry> selected_geometries(GeometryChoice choice) {
     return {kH24Kv4, kH16Kv2};
 }
 
-std::vector<KvCacheStorage> selected_storages(KvChoice choice) {
-    if (choice == KvChoice::Bf16) { return {KvCacheStorage::BFloat16}; }
-    if (choice == KvChoice::Int8) { return {KvCacheStorage::Int8Group64}; }
-    if (choice == KvChoice::Fp8) { return {KvCacheStorage::Fp8E4m3fnGroup128Ue8m0}; }
-    if (choice == KvChoice::Nvfp4) { return {KvCacheStorage::Nvfp4Group16}; }
-    if (choice == KvChoice::K8V4) { return {KvCacheStorage::Fp8KeyNvfp4Value}; }
+std::vector<KvCacheStorage> selected_storages(std::optional<KvCacheStorage> choice) {
+    if (choice) { return {*choice}; }
     return {KvCacheStorage::BFloat16, KvCacheStorage::Int8Group64,
             KvCacheStorage::Fp8E4m3fnGroup128Ue8m0, KvCacheStorage::Nvfp4Group16,
             KvCacheStorage::Fp8KeyNvfp4Value};

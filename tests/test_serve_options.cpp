@@ -9,6 +9,7 @@
 #include <limits>
 #include <stdexcept>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace {
@@ -200,6 +201,21 @@ void test_provenance() {
     }
 }
 
+// Fork-local (rtx4090-port): each fork KV dtype selects its own storage profile.
+void test_fork_kv_dtypes() {
+    for (const auto& [name, storage] :
+         {std::pair{"rk8v4", ninfer::KvCacheStorage::RotatedInt8KeyInt4ValueGroup64},
+          std::pair{"rk4v4", ninfer::KvCacheStorage::RotatedInt4KeyInt4ValueGroup64},
+          std::pair{"rk4v4-e8", ninfer::KvCacheStorage::RK4V4E8},
+          std::pair{"rk2v4-e8", ninfer::KvCacheStorage::RK2V4E8}}) {
+        const auto options = parse({"ninfer-serve", "model.ninfer", "--kv-dtype", name});
+        require(options.launch.engine.kv_cache == storage,
+                "--kv-dtype did not select its fork KV mode");
+        require(std::string(ninfer::kv_cache_profile_info(storage).name) == name,
+                "fork KV mode name does not round-trip");
+    }
+}
+
 } // namespace
 
 int main() {
@@ -209,6 +225,7 @@ int main() {
         test_thinking_control();
         test_effort_tiers_reach_the_frontend();
         test_provenance();
+        test_fork_kv_dtypes();
         std::cout << "ok\n";
         return 0;
     } catch (const std::exception& error) {

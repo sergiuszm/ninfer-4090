@@ -40,6 +40,7 @@ constexpr std::int32_t kFp8QuantGroups   = 2;
 constexpr std::int32_t kNvfp4QuantGroup  = 16;
 constexpr std::int32_t kNvfp4QuantGroups = kHeadDim / kNvfp4QuantGroup;
 constexpr std::int32_t kNvfp4CodeBytes   = kHeadDim / 2;
+constexpr std::int32_t kI4CodeBytes      = kHeadDim / 2; // Fork INT4 / E8 lattice row.
 constexpr float kAttentionScale          = 0.0625f;
 constexpr std::uint16_t kOutputCanary    = 0x7fc1u;
 
@@ -258,6 +259,10 @@ struct HostCache {
     std::vector<std::uint8_t> v_nvfp4;
     std::vector<std::uint8_t> k_nvfp4_scale;
     std::vector<std::uint8_t> v_nvfp4_scale;
+    // Fork-local code bytes, test_cache_layout(storage) extents per row; FP16 G64 scales use
+    // k_scale/v_scale.
+    std::vector<std::uint8_t> k_fork;
+    std::vector<std::uint8_t> v_fork;
 };
 
 void encode_group(std::span<const float> source, std::size_t source_base,
@@ -360,6 +365,10 @@ private:
     void scatter_bf16_rows(std::span<const HostCache> rows, std::vector<std::uint16_t>& k,
                            std::vector<std::uint16_t>& v) const;
 
+    void scatter_fork_rows(std::span<const HostCache> rows, std::vector<std::uint8_t>& k,
+                           std::vector<std::uint8_t>& v, std::vector<std::uint16_t>& ks,
+                           std::vector<std::uint16_t>& vs) const;
+
     void upload_rows(std::span<const HostCache> rows);
 
     Geometry geometry_;
@@ -398,6 +407,11 @@ std::string case_label(const char* entry, const Geometry& geometry, KvCacheStora
 
 void inject_codec_edges(const Geometry& geometry, std::int32_t tokens, std::vector<float>& k,
                         std::vector<float>& v);
+
+// Fork-local rk2v4-e8: redraws key inputs whose E8 root code the device may choose differently
+// from the host codec (fork_e8_root_ambiguous), so appended key bytes compare exactly.
+void avoid_codec_ties(KvCacheStorage storage, const Geometry& geometry, std::int32_t tokens,
+                      std::vector<float>& k);
 
 struct BatchAttentionCase {
     std::int32_t width;
