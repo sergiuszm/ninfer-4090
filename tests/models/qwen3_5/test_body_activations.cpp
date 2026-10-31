@@ -10,6 +10,7 @@ namespace {
 using namespace ninfer;
 using models::qwen3_5::execution::BodyActivations;
 using ops::LinearPolicy;
+namespace execution = models::qwen3_5::execution;
 
 int failures = 0;
 
@@ -76,6 +77,52 @@ void test_operands(const BodyActivations& prefill, const BodyActivations& unchan
            "paired weights and their profile disagree after the rule");
 }
 
+// The effective mode: int8 only when the rule lifts at least one text-body use.
+void test_effective_mode(const BodyActivations& prefill, const BodyActivations& unchanged) {
+    const ops::LinearProfile fp8{QType::FP8_E4M3FN_ROW_BF16, 5120, 6144, LinearPolicy::AllowA8};
+    const ops::ProjectionProfile fp8_projection{fp8, {}};
+    const auto layer = [&](ops::ProjectionProfile projection, ops::LinearProfile output,
+                           ops::LinearProfile gate_up, ops::LinearProfile down, bool gdn) {
+        execution::BlockProfile block;
+        if (gdn)
+            block.mixer = execution::GdnProfile{projection, fp8_projection, {}, output};
+        else
+            block.mixer = execution::AttentionProfile{projection, {}, output};
+        block.ffn = execution::DenseProfile{gate_up, down};
+        return block;
+    };
+    const ops::LinearProfile q4{QType::Q4_G64_FP16, 34816, 5120};
+    const ops::LinearProfile q5{QType::Q5_G64_FP16, 5120, 17408};
+    const ops::ProjectionProfile pair{{QType::Q4_G64_FP16, 7168, 5120},
+                                      ops::LinearProfile{QType::Q5_G64_FP16, 7168, 5120}};
+
+    execution::TextProfile groupwise;
+    groupwise.layers = {layer(pair, q5, q4, q5, false), layer(pair, q5, q4, q5, true)};
+    expect(execution::lifts_text_body(prefill, groupwise),
+           "int8 prefill on a groupwise body is not effective");
+    expect(!execution::lifts_text_body(unchanged, groupwise),
+           "a16 mode or a non-prefill pass reports an effective int8 mode");
+
+    execution::TextProfile fp8_body;
+    fp8_body.output_head = q5;
+    fp8_body.layers      = {layer(fp8_projection, fp8, fp8, fp8, false),
+                            layer(fp8_projection, fp8, fp8, fp8, true)};
+    expect(!execution::lifts_text_body(prefill, fp8_body),
+           "int8 prefill without a groupwise body use reports an effective int8 mode");
+
+    auto one_use = fp8_body;
+    // The FP8 body with one Q5 down projection.
+    std::get<execution::DenseProfile>(one_use.layers[1].ffn).down = q5;
+    expect(execution::lifts_text_body(prefill, one_use),
+           "one groupwise body use does not make int8 prefill effective");
+
+    execution::TextProfile moe;
+    moe.layers        = {layer(fp8_projection, fp8, fp8, fp8, false)};
+    moe.layers[0].ffn = execution::MoeLayerProfile{};
+    expect(!execution::lifts_text_body(prefill, moe),
+           "an MoE body without groupwise uses reports an effective int8 mode");
+}
+
 } // namespace
 
 int main() {
@@ -87,6 +134,7 @@ int main() {
          {BodyActivations{}, BodyActivations(a16, true), BodyActivations(int8, false)}) {
         test_policy(prefill, unchanged);
         test_operands(prefill, unchanged);
+        test_effective_mode(prefill, unchanged);
     }
     std::cout << (failures ? "FAIL" : "ok") << '\n';
     return failures ? 1 : 0;

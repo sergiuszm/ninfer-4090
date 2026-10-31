@@ -1,6 +1,7 @@
 #pragma once
 
 #include "models/load_options.h"
+#include "models/qwen3_5/execution/profile.h"
 #include "ninfer/ops/projection_weights.h"
 
 #include <variant>
@@ -67,5 +68,19 @@ private:
 
     bool int8_ = false;
 };
+
+// Whether the rule permits A8 for at least one text-body use, that is, whether the effective
+// prefill mode is int8. The prefill signature keys the measured cost on this mode, so the int8
+// option on an artifact without a groupwise Q4/Q5 body keeps the a16 signature.
+[[nodiscard]] inline bool lifts_text_body(const BodyActivations& body, const TextProfile& text) {
+    const auto lifts = [&](const auto& profile) { return body(profile) != profile; };
+    for (const auto& block : text.layers) {
+        const bool mixer = std::visit(
+            [&](const auto& m) { return lifts(m.projection) || lifts(m.output); }, block.mixer);
+        const auto* dense = std::get_if<DenseProfile>(&block.ffn);
+        if (mixer || (dense && (lifts(dense->gate_up) || lifts(dense->down)))) return true;
+    }
+    return false;
+}
 
 } // namespace ninfer::models::qwen3_5::execution

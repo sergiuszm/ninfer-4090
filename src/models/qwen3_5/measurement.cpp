@@ -1,6 +1,7 @@
 #include "models/qwen3_5/measurement.h"
 
 #include "models/common/frontend/digest.h"
+#include "models/qwen3_5/execution/precision.h"
 #include "models/qwen3_5/program/planning/moe.h"
 
 #include <nlohmann/json.hpp>
@@ -11,8 +12,8 @@
 
 namespace ninfer::models::qwen3_5 {
 
-std::string prefill_signature(const ModelDefinition& model, const moe::Plan* moe,
-                              std::uint32_t chunk) {
+std::string prefill_signature(const ModelDefinition& model, const execution::ModelProfile& profile,
+                              const moe::Plan* moe, std::uint32_t chunk) {
     using Json         = nlohmann::json;
     const auto& config = model.config();
     const auto& t      = config.text;
@@ -25,9 +26,10 @@ std::string prefill_signature(const ModelDefinition& model, const moe::Plan* moe
                {"rms_norm_eps", t.rms_norm_eps},
                {"layer_types", t.layer_types}};
     // Fork-local (PR #15): INT8 dense-body prefill changes the measured prefill cost, so a
-    // preset measured with A16 activations must not apply to it. A16 adds no fact and keeps the
+    // preset measured with A16 activations must not apply to it. The fact follows the effective
+    // mode: A16, or an int8 option that lifts no text-body use, adds no fact and keeps the
     // upstream signature.
-    if (model.options().prefill_activations == PrefillActivations::Int8)
+    if (execution::lifts_text_body({profile.options, true}, profile.text))
         facts["prefill_activations"] = prefill_activations_name(PrefillActivations::Int8);
     if (moe) {
         auto& execution = facts["moe_execution"];
