@@ -8,12 +8,12 @@ catch-up #4. It replaces the line of 2026-10-06 (binary `3a27f32d`), flag by fla
 
 ```bash
 docker create --name ninfer-qwen38 --gpus all -p 8086:8080 --restart unless-stopped \
-  -v /home/serchio/Models/neroued/Qwen3.8-27B-NInfer:/models \
-  -v /home/serchio/ninfer-deploy/bin/ninfer-serve:/opt/ninfer/ninfer-serve:ro \
+  -v /home/serchio/Models/neroued/Qwen3.8-27B-NInfer-v3:/models:ro \
+  -v /home/serchio/ninfer-deploy/build:/opt/ninfer:ro \
   -v /home/serchio/ninfer-deploy/logs:/logs \
   -v /home/serchio/ninfer-deploy/context-cost:/context-cost:ro \
   <runtime image> \
-  /opt/ninfer/ninfer-serve /models/qwen3_8_27b.ninfer --host 0.0.0.0 --port 8080 \
+  /opt/ninfer/apps/ninfer-serve /models/qwen3_8_27b.ninfer --host 0.0.0.0 --port 8080 \
   --model-id Qwen3.8-27B --max-context 262144 --context-capacity auto \
   --memory-headroom 256MiB \
   --max-concurrency 2 --max-pending-requests 16 --prefill-chunk 1024 \
@@ -23,6 +23,16 @@ docker create --name ninfer-qwen38 --gpus all -p 8086:8080 --restart unless-stop
   --prefill-activations int8 \
   --request-log-jsonl /logs/requests.jsonl
 ```
+
+The model mount is the v3 directory (`qwen3_8_27b.ninfer`, 20.4 GB). The v2 file in
+`Qwen3.8-27B-NInfer` is refused at artifact inspection.
+
+`/home/serchio/ninfer-deploy/build` is a copy of the build directory with `apps/` and `lib/`
+side by side. `ninfer-serve` loads `libninfer_core.so`, `libninfer_ops.so`, `libninfer_cpu.so`,
+`libninfer_cpu_executor.so` and `libninfer_moe_cpu.so` from `$ORIGIN/../lib` (its RUNPATH). The
+old swap of the single `ninfer-serve` file no longer works: without `../lib` the container exits
+with "error while loading shared libraries". GPU window 1 mounted the whole build directory the
+same way.
 
 The `/slots` volume is gone. `--kv-dtype rk4v4-e8` needs the stage 2 KV modes and
 `--prefill-activations int8` needs the stage 3 port. Until both land, a boot of the stage 6 tree
@@ -83,10 +93,11 @@ The production values need the same readings with `rk4v4-e8` at 262144.
 
 ## Runtime image
 
-The binary links libhwloc, liburing and libjpeg. The runtime image on the host needs
-`libhwloc15`, `liburing2` and `libjpeg-turbo8` beside the packages of `ninfer-dev:runtime`. Do not
-use the build image `ninfer-dev:c4b` as the runtime image. Its stub `libcuda.so.1` shadows the
-driver.
+Checked on 2026-10-31 against the `NEEDED` entries of `ninfer-serve` and its `lib/` libraries:
+`ninfer-dev:runtime` resolves all of them except `libhwloc.so.15` and `liburing.so.2`. The FFmpeg
+libraries, `libcurl.so.4`, `libjpeg.so.8` and `libcudart.so.13` are present. The runtime image
+needs `libhwloc15` and `liburing2` in addition. Do not use the build image `ninfer-dev:c4b` as
+the runtime image. Its stub `libcuda.so.1` shadows the driver.
 
 The default seccomp profile of Docker blocks `io_uring`. The direct read queue then fails with
 "initialize direct read queue: Operation not permitted" (the tests print it) and the loader falls
