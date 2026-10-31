@@ -63,7 +63,7 @@ do not fit (see the measurements below), so such a boot also needs a smaller `--
 
 | Flag | Default | Note |
 |---|---|---|
-| `--host-cache-capacity` | 8 GiB plus 8 State images | Same shape as the old host tier (8 GiB of host KV, 8 host State slots). The default is not keyed to the RTX 5090; it applies to every target with discrete memory. **MEASURE**: `ninfer_memory_host_reservation_bytes` against the host RAM |
+| `--host-cache-capacity` | 8 GiB plus 8 State images | Same shape as the old host tier (8 GiB of host KV, 8 host State slots). The default is not keyed to the RTX 5090; it applies to every target with discrete memory. **MEASURE**: `engine.context_cache.host_capacity_bytes` in the `server_start` record against the host RAM. Window 3a: 9821569024 bytes (8 GiB plus 8 State blocks of 153954304 bytes) |
 | `--pending-timeout` | 30 s | A request that waits longer in the queue fails before its stream starts: 503 on Chat and Responses, 504 `timeout_error` on Messages (`45f74287`) |
 | `--stats-interval` | 5 s | Was `--log-stats-interval-ms` |
 | `--thinking-control` | model text | Not on the production line (fork PR #18) |
@@ -88,7 +88,8 @@ The production values need the same readings with `rk4v4-e8` at 262144.
 | Estimated context token capacity | boot log line `context \| device ... \| KV ~N tokens`, or `engine.context_token_capacity_estimate` in the `server_start` record of the request log | `--context-capacity`: keep `auto` if 262144 or more |
 | Free VRAM after warmup | `ninfer_cuda_memory_free_bytes` on `/metrics` | `--memory-headroom` |
 | `max_window_features` | `resources.ranks[0].resources.vision.max_window_features` in the `server_start` record of the request log | `--vision-memory-budget`: 8502 at 512 MiB (window 1). Read it again if the budget changes |
-| Host reservation | `ninfer_memory_host_reservation_bytes` on `/metrics` | `--host-cache-capacity` |
+| Host context cache | `engine.context_cache.host_capacity_bytes` in the `server_start` record of the request log | `--host-cache-capacity` |
+| Host reservation | `ninfer_memory_host_reservation_bytes` on `/metrics`: the media live capacity when Vision is on, else 0 (window 3a: 2147483648) | `--media-live-capacity` |
 | Context cost preset | `bench/context_cost` on the v3 artifact | the `--context-cost-presets` file |
 
 ## Runtime image
