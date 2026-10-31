@@ -490,51 +490,71 @@ void tolerant_protocols() {
     outcome.tool_calls      = decoder.take_tool_calls();
     outcome.finish_reason   = FinishReason::StopToken;
     outcome.tool_call_parse = decoder.diagnostics();
-    require(outcome.text == "Writing it.\nDone." && outcome.tool_calls.size() == 1 &&
+    require(outcome.text == "Writing it." && outcome.tool_calls.size() == 1 &&
                 outcome.tool_calls[0].status == ToolCallStatus::Complete &&
                 recorded.calls == outcome.tool_calls &&
                 Json::parse(outcome.tool_calls[0].arguments_json)["content"] == body &&
                 outcome.tool_call_parse.recovered_from ==
-                    ToolCallParseFallbackReason::MalformedStructure,
-            "tolerant decoder did not recover the quoted close exactly");
+                    ToolCallParseFallbackReason::MalformedStructure &&
+                outcome.tool_call_parse.dropped_trailing_bytes == 5,
+            "tolerant decoder did not recover the call and drop the trailing prose");
 
+    // Chat: the content before the call, then the call; no content after it.
     const auto chat_finish = chat.finish(outcome);
     std::string chat_arguments, chat_content;
+    bool content_after_call = false;
     for (const auto& wire : c) {
         const auto delta = event_json(wire)["choices"][0]["delta"];
-        if (delta.contains("content") && delta["content"].is_string())
+        if (delta.contains("content") && delta["content"].is_string()) {
             chat_content += delta["content"].get<std::string>();
+            content_after_call = content_after_call || !chat_arguments.empty();
+        }
         if (delta.contains("tool_calls"))
             chat_arguments += delta["tool_calls"][0]["function"].value("arguments", "");
     }
     const auto chat_aggregate = Json::parse(
         make_chat_completion_response(make_openai_chat_response_identity("test"), outcome));
     const auto& message = chat_aggregate["choices"][0]["message"];
-    require(chat_arguments == outcome.tool_calls[0].arguments_json &&
+    require(chat_arguments == outcome.tool_calls[0].arguments_json && !content_after_call &&
                 chat_content == outcome.text && message["content"] == outcome.text &&
                 message["tool_calls"][0]["function"]["arguments"] == chat_arguments &&
                 event_json(chat_finish[0])["choices"][0]["finish_reason"] == "tool_calls",
             "Chat stream and aggregate disagree on the recovered call");
 
+    // Responses: every streamed item equals the terminal item; no text after the call.
     const auto response_finish = responses.finish(outcome);
+    r.insert(r.end(), response_finish.events_before_terminal.begin(),
+             response_finish.events_before_terminal.end());
+    const Json output = response_finish.response.body["output"];
     std::string response_arguments;
+    std::size_t done     = 0;
+    bool call_started    = false;
+    bool text_after_call = false;
     for (const auto& wire : r) {
         const auto value = event_json(wire);
-        if (value["type"] == "response.function_call_arguments.delta")
+        if (value["type"] == "response.function_call_arguments.delta") {
             response_arguments += value["delta"].get<std::string>();
+            call_started = true;
+        }
+        if (value["type"] == "response.output_text.delta") text_after_call |= call_started;
+        if (value["type"] != "response.output_item.done") continue;
+        require(output.at(value["output_index"].get<std::size_t>()) == value["item"],
+                "Responses terminal output rewrote a streamed item");
+        ++done;
     }
-    bool response_item = false;
-    for (const auto& item : response_finish.response.body["output"])
-        if (item["type"] == "function_call")
-            response_item =
-                item["arguments"] == response_arguments && item["status"] == "completed";
-    require(response_arguments == chat_arguments && response_item,
+    require(response_arguments == chat_arguments && !text_after_call && done == output.size() &&
+                output.size() == 2 && output[1]["type"] == "function_call" &&
+                output[1]["arguments"] == response_arguments,
             "Responses stream disagrees on the recovered call");
 
+    // Messages: the streamed blocks are the aggregate blocks: text, then tool_use.
     (void)anthropic.finish(outcome);
     std::string anthropic_arguments, anthropic_content;
+    std::vector<std::string> streamed_blocks;
     for (const auto& wire : a) {
         const auto value = event_json(wire);
+        if (value["type"] == "content_block_start")
+            streamed_blocks.push_back(value["content_block"]["type"].get<std::string>());
         if (value["type"] != "content_block_delta") continue;
         if (value["delta"]["type"] == "input_json_delta")
             anthropic_arguments += value["delta"]["partial_json"].get<std::string>();
@@ -543,16 +563,29 @@ void tolerant_protocols() {
     }
     const auto anthropic_aggregate =
         Json::parse(make_anthropic_messages_response(anthropic_identity, outcome));
+    std::vector<std::string> aggregate_blocks;
     bool tool_use = false;
-    std::string aggregate_text;
     for (const auto& block : anthropic_aggregate["content"]) {
+        aggregate_blocks.push_back(block["type"].get<std::string>());
         if (block["type"] == "tool_use") tool_use = block["input"]["content"] == body;
-        if (block["type"] == "text") aggregate_text += block["text"].get<std::string>();
     }
     require(anthropic_arguments == chat_arguments && anthropic_content == outcome.text &&
-                tool_use && aggregate_text == outcome.text &&
+                tool_use && streamed_blocks == aggregate_blocks &&
+                aggregate_blocks == std::vector<std::string>{"text", "tool_use"} &&
                 anthropic_aggregate["stop_reason"] == "tool_use",
             "Messages stream and aggregate disagree on the recovered call");
+
+    // Flag off: the same output is invalid_tool_output (the change is 500 -> completed call).
+    fi::ToolCallOutputDecoder strict(contract(false, false), 64);
+    (void)strict.feed(text);
+    (void)strict.finish();
+    bool strict_invalid = false;
+    try {
+        if (const auto error = strict.error()) std::rethrow_exception(error->exception());
+    } catch (const RequestError& error) {
+        strict_invalid = error.kind() == RequestErrorKind::InvalidToolOutput;
+    }
+    require(strict_invalid, "flag-off decoding of the quoted close changed");
 
     // Prose and then another call: the request fails and no call completes.
     fi::ToolCallOutputDecoder failing(contract(false, false), 64, false, true);
