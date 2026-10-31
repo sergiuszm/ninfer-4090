@@ -283,6 +283,11 @@ static int run_profile(std::string_view label, const Profile& profile,
                                              profile.qtype, profile.gate_up_rows,
                                              profile.input_rows, policy, 1, admitted_maximum);
     int failures                 = 0;
+    // Fork-local (PR #15): Q4 under an A8 permission uses INT8 at every T, so a token's output
+    // must not depend on the call width. Eager calls run in increasing token order.
+    const bool int8_invariant =
+        profile.qtype == QType::Q4_G64_FP16 && ops::allows_a8(profile.policy);
+    std::vector<double> previous_int8;
     const auto run_case          = [&](const Invocation& call) {
         const auto tokens   = call.tokens;
         const auto replay   = call.graph;
@@ -374,6 +379,15 @@ static int run_profile(std::string_view label, const Profile& profile,
                 failures += output.verify_guards(label_case);
                 failures += scratch.verify_guards(label_case + " workspace");
                 const auto actual = read_bf16_output(output, elements);
+                if (int8_invariant && !replay) {
+                    const auto shared = std::min(previous_int8.size(), actual.size());
+                    if (!std::equal(previous_int8.begin(), previous_int8.begin() + shared,
+                                    actual.begin())) {
+                        std::cerr << label_case << ": A8 output changed with token extent\n";
+                        ++failures;
+                    }
+                    previous_int8 = actual;
+                }
                 failures += compare_output(label_case, actual, expected.data(), profile.policy,
                                                     profile.clamp_limit > 0);
                 if (replay)

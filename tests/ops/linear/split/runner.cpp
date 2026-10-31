@@ -147,7 +147,8 @@ ops::ProjectionWeights prepare(const Profile& profile, const Invocation& call,
                                const std::vector<std::unique_ptr<DevicePackedWeight>>& weights) {
     if (profile.binding == Binding::Direct) {
         if (weights.size() == 2)
-            return ops::PairedProjectionWeights{weights[0]->view(), weights[1]->view()};
+            return ops::PairedProjectionWeights{weights[0]->view(), weights[1]->view(),
+                                                call.policy};
         return ops::SingleProjectionWeight{weights[0]->view(), call.policy};
     }
     std::vector<WeightParent> parents;

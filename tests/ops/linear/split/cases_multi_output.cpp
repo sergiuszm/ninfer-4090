@@ -24,6 +24,18 @@ void add_multi_output_cases(Suite& suite) {
         for (int t :
              {1, 7, 8, 9, 12, 13, 16, 32, 63, 64, 65, 96, 104, 105, 127, 128, 129, 192, 193, 17})
             calls.push_back({.t = t, .graph = true, .input_seed = 101U, .sample_rows = 31});
+        // Fork-local (PR #15): the INT8 group-64 route under an A8 permission, at every token
+        // extent and across the 4096-token staging tile.
+        for (int t : {1, 16, 17, 21, 48, 64, 128, 257, 1024, 4097})
+            calls.push_back(
+                {.t = t, .policy = Policy::AllowA8, .input_seed = 101U, .sample_rows = 31});
+        for (int t : {1, 64, 257})
+            calls.push_back({.t           = t,
+                             .policy      = Policy::AllowA8,
+                             .graph       = true,
+                             .input_seed  = 101U,
+                             .sample_rows = 31});
+        calls.push_back({.t = 0, .policy = Policy::AllowA8, .workspace_intervals = true});
         add_profile(suite, profile, std::move(calls));
     }
     {
