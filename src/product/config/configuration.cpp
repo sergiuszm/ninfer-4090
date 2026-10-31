@@ -232,6 +232,9 @@ StartupConfigurationView view(const LaunchOptions& launch, EntryPoint entry, con
         case Field::ModelId:
             value = server->model_id_override.value_or("artifact name");
             break;
+        case Field::TolerantToolCalls:
+            value = server->tolerant_tool_calls;
+            break;
         case Field::Cors:
             value = server->enable_cors;
             break;

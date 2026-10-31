@@ -100,6 +100,9 @@ constexpr FieldSpec kFields[] = {
      "Authentication key; empty disables authentication.", Scope::Serve},
     {Field::ModelId, "server.model_id", "--model-id", "", "ID",
      "Public model alias; empty uses the artifact name.", Scope::Serve},
+    {Field::TolerantToolCalls, "server.tolerant_tool_calls", "--tolerant-tool-calls",
+     "--no-tolerant-tool-calls", "", "Recover free-route Qwen tool calls that quote markup.",
+     Scope::Serve},
     {Field::Cors, "server.cors", "--cors", "--no-cors", "", "Permissive CORS headers.",
      Scope::Serve},
     {Field::MaxRequestSize, "server.max_request_size", "--max-request-size", "", "SIZE",
@@ -322,6 +325,7 @@ FieldValue parse_field_value(Field field, const RawValue& value, bool command_li
     case Field::PrefixReuse:
     case Field::Thinking:
     case Field::PreserveThinking:
+    case Field::TolerantToolCalls:
     case Field::Cors:
     case Field::RawOutput:
     case Field::PrintTokenIds:

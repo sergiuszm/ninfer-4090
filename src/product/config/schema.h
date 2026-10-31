@@ -50,6 +50,7 @@ enum class Field {
     ServerPort,
     ApiKey,
     ModelId,
+    TolerantToolCalls,
     Cors,
     MaxRequestSize,
     ResponseRecords,

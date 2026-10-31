@@ -490,6 +490,9 @@ ParsedOptions parse(int argc, char** argv, EntryPoint entry,
         case Field::ModelId:
             if (!string().empty()) parsed.serve.model_id_override = string();
             break;
+        case Field::TolerantToolCalls:
+            parsed.serve.tolerant_tool_calls = boolean();
+            break;
         case Field::Cors:
             parsed.serve.enable_cors = boolean();
             break;
