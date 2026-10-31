@@ -41,7 +41,7 @@ fork-new	scripts/run-qwen38-c8.bat	scripts/run-qwen38-c8.bat  [dir GONE upstream
 fork-new	scripts/run-qwen38-c8.sh	scripts/run-qwen38-c8.sh  [dir GONE upstream]	0 carried f9a339f1; open: 4 flags removed upstream (--kv-capacity, --lm-head-draft, --default-max-tokens)	9b802a89
 fork-new	scripts/run-qwen38-vision.bat	scripts/run-qwen38-vision.bat  [dir GONE upstream]	0 carried f9a339f1; open: 4 flags removed upstream (--kv-capacity, --lm-head-draft, --default-max-tokens)	2ae51915
 fork-new	scripts/run-qwen38-vision.sh	scripts/run-qwen38-vision.sh  [dir GONE upstream]	0 carried f9a339f1; open: 4 flags removed upstream (--kv-capacity, --lm-head-draft, --default-max-tokens)	9b802a89
-modified-in-place	src/CMakeLists.txt	src/CMakeLists.txt	1 B1, B2/B5 3090 base; 3 PR15; 6 S1	7a507d1f 4277f14b 1eef8d83 09a93fd4
+modified-in-place	src/CMakeLists.txt	src/CMakeLists.txt	B2 by device guards (no exclusions; mbarrier and TMA in ops/common/cuda/pipeline.cuh); open: 1 B5, 3 PR15 sources, 6 S1	7a507d1f 4277f14b 1eef8d83 09a93fd4
 modified-in-place	src/artifact/binder.cpp	src/artifact/binder.cpp	1 B2/B5 3090 base	09a93fd4
 modified-in-place	src/artifact/binder.h	src/artifact/binder.h	1 B2/B5 3090 base	09a93fd4
 modified-in-place	src/artifact/reader.cpp	src/artifact/reader.cpp	1 B2/B5 3090 base	09a93fd4
@@ -60,7 +60,7 @@ fork-new	src/ops/common/int8_mma.cuh	src/ops/common/int8_mma.cuh	3 PR15	1f7ee28f
 fork-new	src/ops/common/int8_proj_launch.cu	src/ops/common/int8_proj_launch.cu	3 PR15	1f7ee28f 7a507d1f
 fork-new	src/ops/common/int8_proj_launch.h	src/ops/common/int8_proj_launch.h	3 PR15	1f7ee28f 7a507d1f
 fork-new	src/ops/common/int8_rowsplit_gemm.cuh	src/ops/common/int8_rowsplit_gemm.cuh	3 PR15	1f7ee28f 7a507d1f
-gone	src/ops/common/mma.cuh	deleted in ae54c1a9; candidates: src/ops/common/cuda/mma.cuh (9/9); src/ops/linear_attention/gated_delta_net/recurrence/chunked/recurrence.cu (4/9); src/ops/linear_attention/kimi_delta_attention/chunked/recurrence.cu (4/9)	1 B4 + 2 K2 (i8 retune ce50e995)	ce50e995
+gone	src/ops/common/mma.cuh	src/ops/common/cuda/mma.cuh (ae54c1a9)	1 B4 done (plain e4m3 below sm_120, mma_f16_f16acc carried); open: 2 K2 i8 retune (ce50e995)	ce50e995
 gone	src/ops/dynamic_grouped_conv/w8/w8_dynamic_grouped_conv_add_materialized.cu	deleted in 1844d861; candidates: src/ops/dynamic_grouped_conv/add/launch.cu (9/15); src/ops/linear/pair/q8/shapes/n1024_k2048.cu (4/15); src/ops/linear/swiglu/q8/shapes/n34816_k5120.cu (4/15)	DROP K3; stage 1 build checks the 48 KB static smem cap on the Q8 successor	87189c68
 gone	src/ops/gdn_gating_proj/bf16/bf16_gdn_gating_proj_gemm_mma.cuh	src/ops/linear_attention/gated_delta_net/control/kernels/mma.cuh (f7d3090b)	0 carried 70185719	5d57fed9
 gone	src/ops/gdn_gating_proj/bf16/bf16_gdn_gating_proj_kernels.cu	src/ops/linear_attention/gated_delta_net/control/kernels/mma_launch.cuh (f7d3090b)	0 dissolved: upstream residency() sizes cooperative chunks by occupancy (Full and Predicated)	8adf1797 1f7ee28f 7a507d1f
