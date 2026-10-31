@@ -644,6 +644,23 @@ int test_tools_and_effective_subset() {
     return failures;
 }
 
+// Fork-local (catch-up #4 decision 2): Responses has no tool_constraints field, so the server
+// default selects the mode.
+int test_tool_constraint_default() {
+    using ninfer::ToolConstraintMode;
+    const Json body = Json::parse(
+        R"({"model":"m","input":"probe","tools":[{"type":"function","name":"probe","parameters":{"type":"object"}}]})");
+
+    const auto parse_with = [&](ToolConstraintMode mode) {
+        RequestLimits value            = limits();
+        value.default_tool_constraints = mode;
+        return parse_openai_responses_create_request(body, value).prompt.generation;
+    };
+    return check(!parse_with(ToolConstraintMode::Automatic).constrains_tools() &&
+                     parse_with(ToolConstraintMode::Basic).constrains_tools(),
+                 "Responses ignored the server tool-constraint default");
+}
+
 int test_namespace_tools() {
     const Json clock_namespace = {
         {"type", "namespace"},
@@ -1174,6 +1191,7 @@ int main() {
     failures += test_response_output_history_round_trip();
     failures += test_assistant_item_boundaries_and_errors();
     failures += test_tools_and_effective_subset();
+    failures += test_tool_constraint_default();
     failures += test_namespace_tools();
     failures += test_explicit_rejections();
     failures += test_previous_response_call_graph();

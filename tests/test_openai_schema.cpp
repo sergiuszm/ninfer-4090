@@ -530,6 +530,60 @@ int test_tools() {
     return failures;
 }
 
+// Fork-local (catch-up #4 decision 2): the server default applies when the body omits
+// tool_constraints, and the body field overrides it.
+int test_tool_constraint_default() {
+    using ninfer::ToolConstraintMode;
+    int failures  = 0;
+    Json body     = base_request();
+    body["tools"] = Json::array({function_tool()});
+
+    const auto parse_with = [&](ToolConstraintMode mode) {
+        return parse_chat_completion_request(
+                   body, RequestLimits{.default_max_tokens = 512, .default_tool_constraints = mode})
+            .generation;
+    };
+    failures += check(limits().default_tool_constraints == ToolConstraintMode::Basic,
+                      "RequestLimits lost the library default");
+    const GenerationRequest automatic = parse_with(ToolConstraintMode::Automatic);
+    failures += check(automatic.tool_choice.constraints == ToolConstraintMode::Automatic &&
+                          !automatic.constrains_tools() &&
+                          options(automatic).tool_choice.constraints ==
+                              ToolConstraintMode::Automatic,
+                      "auto server default did not reach the request options");
+    const GenerationRequest basic = parse_with(ToolConstraintMode::Basic);
+    failures += check(basic.tool_choice.constraints == ToolConstraintMode::Basic &&
+                          basic.constrains_tools(),
+                      "basic server default did not restore upstream constraints");
+    body["tool_constraints"] = "basic";
+    failures += check(parse_with(ToolConstraintMode::Automatic).constrains_tools(),
+                      "body basic did not override the auto default");
+    body["tool_constraints"] = "auto";
+    failures += check(!parse_with(ToolConstraintMode::Basic).constrains_tools(),
+                      "body auto did not override the basic default");
+    body["tool_constraints"] = nullptr;
+    failures += check(!parse_with(ToolConstraintMode::Automatic).constrains_tools() &&
+                          parse_with(ToolConstraintMode::Basic).constrains_tools(),
+                      "null tool_constraints did not select the server default");
+    for (const Json& invalid :
+         {Json("strict"), Json("Auto"), Json(1), Json(true), Json::object()}) {
+        body["tool_constraints"] = invalid;
+        const ApiError error = api_error([&] { (void)parse_with(ToolConstraintMode::Automatic); });
+        failures += check(error.status == 400 && error.param == "tool_constraints",
+                          "invalid tool_constraints was not a 400: " + invalid.dump());
+    }
+
+    ServeOptions server;
+    failures += check(request_limits(server).default_tool_constraints ==
+                              ToolConstraintMode::Automatic &&
+                          request_limits(server).default_max_tokens == 8192,
+                      "request_limits lost the server defaults");
+    server.tool_constraints = ToolConstraintMode::Basic;
+    failures += check(request_limits(server).default_tool_constraints == ToolConstraintMode::Basic,
+                      "request_limits ignored --tool-constraints basic");
+    return failures;
+}
+
 int test_messages_and_media() {
     int failures                   = 0;
     Json body                      = base_request();
@@ -997,6 +1051,7 @@ int main() {
     failures += test_prompt_cache_boundaries();
     failures += test_constrained_decoding_extensions();
     failures += test_tools();
+    failures += test_tool_constraint_default();
     failures += test_messages_and_media();
     failures += test_reasoning_and_extensions();
     failures += test_stops_and_ranges();
