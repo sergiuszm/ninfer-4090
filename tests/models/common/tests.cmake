@@ -40,6 +40,10 @@ ninfer_add_test(ninfer_tool_call_parser_test
   SOURCES "${CMAKE_CURRENT_LIST_DIR}/qwen/test_tool_call_parser.cpp"
   LIBRARIES ninfer_model_control ninfer::json)
 
+ninfer_add_test(ninfer_tolerant_tool_calls_test
+  SOURCES "${CMAKE_CURRENT_LIST_DIR}/qwen/test_tolerant_tool_calls.cpp"
+  LIBRARIES ninfer_model_control ninfer::json)
+
 set_tests_properties(ninfer_context_store_test ninfer_kv_history_test ninfer_kv_cache_test
   ninfer_qwen_visual_scatter_test
   PROPERTIES SKIP_RETURN_CODE 77 LABELS "gpu")
