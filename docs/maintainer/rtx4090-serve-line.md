@@ -58,6 +58,7 @@ do not fit (see the measurements below), so such a boot also needs a smaller `--
 | `--slot-save-path /slots`, `--auto-save-evicted` | removed | Slot persistence is dropped (plan decision 1). `GET /slots` is read-only and carries no `session_digest`, so the pi slot extension turns itself off |
 | `--max-private-continuations 2`, `--max-shared-prefixes 1` | removed | Upstream removed them before `81c8ce09`. The context cache bounds retained sessions by bytes |
 | `--auto-long-anchors 2` | removed | R4 is dropped (plan decision 4) |
+| (none) | `--tolerant-tool-calls` PROPOSED, not on the line | Fork PR #14, re-ported to the streaming decoder. Production never deployed it (port ledger, round 4). It acts only on the free route, so with `--tool-constraints auto` it covers pi traffic. A file write that quotes `\n</parameter>` then completes exactly instead of failing with `invalid_tool_output`. The user decides at the deploy proposal |
 
 ## Defaults that the line keeps
 

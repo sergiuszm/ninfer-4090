@@ -234,6 +234,8 @@ so an unmatched nested parameter opener or a standalone `</parameter>` cannot be
 unambiguously. After a declared function header has started, malformed structure fails that request
 with `invalid_tool_output`; earlier tool events are never retracted into ordinary content.
 An unrecognized Qwen header on the free-generation route can still be returned as text.
+With `--tolerant-tool-calls`, the free route decides these cases by lookahead instead (see
+[RTX 4090 fork notes](#rtx-4090-fork-notes)).
 GLM uses `<tool_call>`, `<arg_key>` and `<arg_value>` framing. Its raw argument values end at
 `</arg_value>`; clients continue to send and receive protocol tool objects, not these model markers.
 
@@ -1004,7 +1006,9 @@ unspecified. `enable_thinking` records whether the response starts in thinking m
 `request_done.result.tool_call_parse` records whether a complete marker was seen, the structured
 call count, schema-mismatched arguments
 preserved for consumer validation, and a stable text-fallback reason. Fallback reasons are `none`,
-`malformed_structure`, `invalid_tool_name`, and `undeclared_tool`. `tool_call_count` and
+`malformed_structure`, `invalid_tool_name`, and `undeclared_tool`. With `--tolerant-tool-calls`,
+`recovered_from` names the strict failure that a completed response recovered from
+(`malformed_structure` or `trailing_content`); otherwise it is `none`. `tool_call_count` and
 `structured_call_count` count complete calls, excluding an interrupted call's parameter prefix.
 Free-generation format errors after a recognized header use `request_error` with `invalid_tool_output`
 instead of text fallback; constrained decoder disagreements are internal errors. These counters
@@ -1225,6 +1229,41 @@ This fork changes the serve behaviors below. The production line is in
   budget, the control tokens and one more token, the request fails with HTTP 400
   `thinking_budget_capacity_insufficient`. The startup log line `thinking control | N tokens`
   and `thinking_control_tokens` in the `server_start` record give the length.
+- **Tolerant tool calls.** `--tolerant-tool-calls` (TOML `server.tolerant_tool_calls`, default
+  off) is fork PR #14 on the streaming Qwen tool decoder. It acts only on the free route, that is
+  `tool_constraints: "auto"` without a strict, selection or count policy. The constrained route
+  and output with the flag off do not change. The decoder decides each value end by lookahead
+  before it publishes anything after that end. A `</parameter>` ends the value only before a new
+  `<parameter=NAME>` of the call, or before `</function></tool_call>` whose end is real. An end is
+  quoted when another `</tool_call>` follows before the next `<tool_call>` and the text between
+  them is more than close markers. A quoted end and any other close become value text. The
+  candidates keep the production order: the balanced close first, then nested closes followed by
+  structure, then later closes in text order. A `<tool_call>` followed by ordinary text before
+  the first call is content. Text after the last call is content, after the whitespace that
+  preceded the first call. A suffix of only close markers is dropped. `recovered_from` in
+  `tool_call_parse` and the info line `tool markup recovered | <reason>` report each recovery.
+
+  Safety rules (production review rounds 1 to 4). A `<tool_call>` followed by `<` is an attempt
+  to open a call and is never skipped, so a malformed or undeclared opener stays text. A later
+  candidate must not open a `<tool_call>` or `<function=` that it does not close. A call that
+  completes through recovery fails the request if one of its values opens such a call. Text
+  that contains another `<tool_call>` after a call fails the request. A call can reject at most
+  64 value ends; after that, the request fails. Output that stops on the output or context
+  limit, on a stop string or on cancellation never completes a call through recovery. A pending
+  end then resolves as in strict mode, and a call that already needed recovery stays incomplete.
+
+  Streaming. Argument deltas stream as before and are never retracted. The decoder holds output
+  only from a candidate until its verdict, normally one or two tokens. The last value of a call
+  waits for the token after `</tool_call>`. A nested `</parameter>` followed by structure holds
+  the rest of its value until the balanced close or the end of output. The held text is bounded
+  by the value of the call, so by the output limit.
+
+  Differences to production. Output that cannot be recovered fails with `invalid_tool_output`
+  instead of returning text. A split at a valid parameter header is final; production can
+  backtrack across it. Calls that completed before an interrupted end stay complete. **Residual
+  risk, by design:** an example call followed only by prose runs, because it is the same as a real
+  call followed by prose. **Recovered values are a best guess:** a value that contains a complete
+  fake parameter sequence can split there.
 - **Effort map.** Before it renders the artifact's own template, the Qwen frontend maps `high`
   and `max` to `xhigh` and `minimal` to `low`, as the Flash-Next template does. The Qwen3.8-27B
   template supports only `xhigh`, `medium` and `low`, so these tiers no longer fail with

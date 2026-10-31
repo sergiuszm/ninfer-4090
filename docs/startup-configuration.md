@@ -203,6 +203,7 @@ for examples and interactions with tools and stops.
 | `server.port` | `--port` | 1..65535 / 8080 | HTTP port |
 | `server.api_key` | `--api-key` | String / `""` | Empty disables authentication |
 | `server.model_id` | `--model-id` | String / `""` | Public alias; empty uses artifact metadata |
+| `server.tolerant_tool_calls` | `--tolerant-tool-calls` / `--no-tolerant-tool-calls` | bool / false | Fork: [tolerant Qwen tool calls](serving.md#rtx-4090-fork-notes) on the free route |
 | `server.cors` | `--cors` / `--no-cors` | bool / false | Cross-origin responses |
 | `server.max_request_size` | `--max-request-size` | Positive bytes / `384MiB` | HTTP body limit |
 | `server.responses.max_records` | `--response-store-max-records` | Positive uint64 / 1024 | Process-local Responses history count |
