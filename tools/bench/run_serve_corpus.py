@@ -24,6 +24,7 @@ MANIFEST_PATH = REPO_ROOT / "examples/cli/manifest.json"
 
 SPECULATIVE_MODES = {
     "mtp0": ("none", 0),
+    "mtp2": ("mtp", 2),
     "mtp3": ("mtp", 3),
     "mtp5": ("mtp", 5),
     "dflash7": ("dflash", 7),
