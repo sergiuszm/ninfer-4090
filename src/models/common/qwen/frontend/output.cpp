@@ -94,7 +94,8 @@ models::frontend::OutputSession create_output_session(
     std::unique_ptr<models::frontend::BodyDecoder> decoder;
     if (!output.raw) {
         auto tools = std::make_unique<ToolCallOutputDecoder>(std::move(tool_contract),
-                                                             output.tool_name_max_length, combined);
+                                                             output.tool_name_max_length, combined,
+                                                             output.tolerant_tool_calls);
         if (!prompt.continuation_content.empty())
             tools->initialize_continuation(prompt.continuation_content);
         decoder = std::move(tools);
