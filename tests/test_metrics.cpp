@@ -94,6 +94,37 @@ int main() {
                     "direction=\"peer_d2d\"} 1024\n") != std::string::npos,
           "peer context transfers were not exposed separately from local copies");
 
+    // The fleet dashboard reads these llama.cpp names; warmup work must not count.
+    EngineSnapshot warm;
+    warm.runtime.computed_prefill_tokens       = 100;
+    warm.runtime.committed_decode_tokens       = 10;
+    warm.executions[0].exposure.total.total_ns = 1'000'000'000;
+    warm.executions[1].exposure.total.total_ns = 500'000'000;
+    Metrics llama;
+    llama.configure("model", options, description, startup, warm);
+    EngineSnapshot served = warm;
+    served.runtime.computed_prefill_tokens += 2048;
+    served.runtime.committed_decode_tokens += 64;
+    served.executions[0].exposure.total.total_ns += 2'000'000'000;
+    served.executions[1].exposure.total.total_ns += 1'500'000'000;
+    served.executions[3].exposure.total.total_ns += 7'000'000'000;
+    served.runtime.running_requests = 2;
+    served.runtime.waiting_requests = 1;
+    served.runtime.paused_requests  = 1;
+    const auto scraped = llama.render(served, true);
+    check(scraped.find("\nllamacpp:prompt_tokens_total 2048\n") != std::string::npos &&
+              scraped.find("\nllamacpp:prompt_seconds_total 2\n") != std::string::npos &&
+              scraped.find("\nllamacpp:tokens_predicted_total 64\n") != std::string::npos &&
+              scraped.find("\nllamacpp:tokens_predicted_seconds_total 1.5\n") !=
+                  std::string::npos,
+          "llama.cpp counters must be warmup-free prefill/decode tokens and exposure seconds");
+    check(scraped.find("\nllamacpp:requests_processing 2\n") != std::string::npos &&
+              scraped.find("\nllamacpp:requests_deferred 2\n") != std::string::npos,
+          "llama.cpp gauges must split resident from waiting and paused requests");
+    check(scraped.find("# TYPE llamacpp:prompt_tokens_total counter\n") != std::string::npos &&
+              scraped.find("# TYPE llamacpp:requests_deferred gauge\n") != std::string::npos,
+          "llama.cpp series must carry their Prometheus types");
+
     GenerationOutcome outcome;
     outcome.finish_reason                          = FinishReason::OutputLimit;
     outcome.stats.timings.total_seconds            = 2.0;
