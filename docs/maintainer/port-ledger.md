@@ -251,6 +251,52 @@ tokens) returned 200 with the correct count; one 3200x3200 image (10,000 tokens)
 remaining wall is the 32768 aggregate, about 39 such screenshots or 8 images at pi's
 2000x2000 resize cap in one conversation.
 
+## Upstream catch-up #4 (in progress): `neroued/master` `1882c6ad`
+
+Started 2026-10-07 on branch `catchup4` from upstream `81c8ce09` (`master` and `dev` were the same
+commit). A merge into `rtx4090-port` is not practical: upstream replaced the context cache
+(`b9114396`), moved the model code to `src/models/qwen3_5` and split the CMake files per
+component. A trial merge of `fdb7a6cf` gave 95 conflicted paths. `rtx4090-port` stays the branch
+of record and the production source until the catch-up deploys. Plan, stage gates and the remap of
+every fork feature: `ninfer-recon-notes/CATCHUP-20261007.md`.
+
+Re-home (2026-10-31): when `catchup4` held stages 0 to 2 (30 commits), upstream `master` was at
+`1882c6ad`, 292 commits past `81c8ce09`. A trial merge gave 43 conflicted files. In 23 of them
+upstream had deleted or restructured a file that the fork changes, and `src/ops/kernel` was split
+into family directories. Stages 0 and 1 were therefore applied again, commit by commit, on branch
+`catchup4b` from `1882c6ad`, and stage 2 follows on that branch. Each re-homed commit names its
+`catchup4` original.
+
+Decisions (2026-10-07):
+
+- Slot persistence: DROP. A read-only `GET /slots` stays for the fleet dashboard, without the
+  `session_digest` key. Explicit save and restore is decided after one week of production on the
+  new cache.
+- PR #14 tolerant tool calls: carried, active only on the unconstrained tool-call route.
+- R4 automatic long anchors: DROP.
+- Upstream tool constraints on by default: decided after the stage 4 gate.
+
+File map: `docs/maintainer/catchup-4-filemap.tsv` lists the 207 non-docs files that the fork
+changed since `d4929686`. The columns are the file status at `1882c6ad`, the upstream path, the
+disposition and the fork commits that changed the file. For a file that upstream deleted, the
+upstream column names the deleting commit and the upstream files that share the most identifiers
+with it, or the place that received the fork change. A disposition is a stage number with the
+feature ids of the plan, `carried <commit>`, `dissolved` with the reason, or `DROP`. Each stage
+updates its rows when it lands.
+
+Finding for stage 2: K1 is not MECHANICAL as the remap says. The fork append kernel stores
+`Int8Group64` keys unrotated, and the fork attention reads them that way. Upstream rotates the keys
+with the d256 Hadamard (`17a7275f`, now `kv_cache/kernels/write/int8.cuh`), and upstream's int8
+attention (`softmax_attention/kernels/causal/int8/`) expects rotated keys. Catch-up #3 kept the
+fork form (see the `causal_cache.cpp` oracle row there). K2 option A keeps upstream's int8
+attention unchanged. The fork modes then need their own append path, and the unrotated-K hunk of
+the old `tests/ops/test_kv_cache_append.cpp` (now `tests/ops/kv_cache/append_*.cpp`) applies only
+to that path.
+
+Docs for later stages: fork edits to `README.md`, `docs/cli.md` and `docs/serving.md` wait for
+stage 6, where the flag set is final. `docs/rtx-3090-linux.md` and `docs/rtx-3090-windows.md` still
+name v1 and v2 artifacts. Refresh them at stage 7.
+
 ## Community triage 2026-10-07, round 4 (PR #14)
 
 T-Crypt answered the round-3 P1 with `e7495e6c` on 2026-10-06. The commit implements the rule that
