@@ -83,6 +83,12 @@ SessionImpl::reserve_capture_destination(std::uint32_t lane, std::uint32_t front
         const auto host = demand.add_state(
             {.count = 1, .logical_count = 0, .memory = context::ContextMemory::Host});
         if (!directory.assess(demand, *released).ready()) return Status::NeedsContext;
+        // Fork-local (catch-up #4): the destination descriptor is reserved before the victims are
+        // released, and the assessment above does not count it. Without these checks a short
+        // descriptor budget throws out of the Session instead of asking for context reclaim.
+        if (!state_store->available_descriptors() ||
+            state_store->metadata_requirement(1) > directory.metadata_budget().available())
+            return Status::NeedsContext;
         const auto destination = state_store->reserve_logical_destination();
         if (!destination) return Status::NeedsContext;
         ticket->state = *destination;
