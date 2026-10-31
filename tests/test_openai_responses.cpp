@@ -656,9 +656,23 @@ int test_tool_constraint_default() {
         value.default_tool_constraints = mode;
         return parse_openai_responses_create_request(body, value).prompt.generation;
     };
-    return check(!parse_with(ToolConstraintMode::Automatic).constrains_tools() &&
-                     parse_with(ToolConstraintMode::Basic).constrains_tools(),
-                 "Responses ignored the server tool-constraint default");
+    const GenerationRequest automatic = parse_with(ToolConstraintMode::Automatic);
+    const GenerationRequest basic     = parse_with(ToolConstraintMode::Basic);
+    int failures = check(automatic.tool_choice.constraints == ToolConstraintMode::Automatic &&
+                             !automatic.constrains_tools() &&
+                             basic.tool_choice.constraints == ToolConstraintMode::Basic &&
+                             basic.constrains_tools(),
+                         "Responses ignored the server tool-constraint default");
+    for (const Json& value : {Json("auto"), Json(nullptr)}) {
+        Json with_field                = body;
+        with_field["tool_constraints"] = value;
+        const ApiError error =
+            api_error([&] { (void)parse_openai_responses_create_request(with_field, limits()); });
+        failures += check(error.status == 400 && error.param == "tool_constraints" &&
+                              error.code == "unknown_parameter",
+                          "Responses accepted a tool_constraints field: " + value.dump());
+    }
+    return failures;
 }
 
 int test_namespace_tools() {

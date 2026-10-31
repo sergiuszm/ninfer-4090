@@ -466,10 +466,17 @@ int test_tool_constraint_default() {
     body["tool_constraints"] = "auto";
     failures += check(!parse_with(ToolConstraintMode::Basic).constrains_tools(),
                       "Messages body auto did not override the basic default");
+    body["tool_constraints"] = nullptr;
+    failures += check(!parse_with(ToolConstraintMode::Automatic).constrains_tools() &&
+                          parse_with(ToolConstraintMode::Basic).constrains_tools(),
+                      "Messages null tool_constraints did not select the server default");
     for (const Json& invalid : {Json("none"), Json(0)}) {
         body["tool_constraints"] = invalid;
-        failures += check(api_param([&] { (void)parse_with(ToolConstraintMode::Automatic); }) ==
-                              "tool_constraints",
+        ApiError error{.status = 0};
+        try {
+            (void)parse_with(ToolConstraintMode::Automatic);
+        } catch (const ApiException& exception) { error = exception.error(); }
+        failures += check(error.status == 400 && error.param == "tool_constraints",
                           "invalid Messages tool_constraints was accepted: " + invalid.dump());
     }
     return failures;
