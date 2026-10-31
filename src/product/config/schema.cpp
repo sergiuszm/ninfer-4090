@@ -21,8 +21,9 @@ constexpr FieldSpec kFields[] = {
      Scope::Common},
     {Field::MaxContext, "engine.max_context", "--max-context", "", "N",
      "Per-request context limit (8192; perplexity defaults to its scoring window).", Scope::Common},
-    {Field::KvDtype, "engine.kv_dtype", "--kv-dtype", "", "bf16|int8|fp8|nvfp4|k8v4",
-     "KV representation.", Scope::Common},
+    {Field::KvDtype, "engine.kv_dtype", "--kv-dtype", "",
+     "bf16|int8|fp8|nvfp4|k8v4|rk8v4|rk4v4|rk4v4-e8|rk2v4-e8", "KV representation.",
+     Scope::Common},
     {Field::ContextCapacity, "engine.context_capacity", "--context-capacity", "", "SIZE|auto",
      "Per-rank Device capacity shared by KV and State; auto uses the startup budget.",
      Scope::Common, ConfigurationUnit::Bytes},
@@ -375,7 +376,8 @@ FieldValue parse_field_value(Field field, const RawValue& value, bool command_li
     case Field::FrequencyPenalty:
         return real(value, command_line, -2, 2);
     case Field::KvDtype:
-        return enumeration(value, {"bf16", "int8", "fp8", "nvfp4", "k8v4"});
+        return enumeration(value, {"bf16", "int8", "fp8", "nvfp4", "k8v4", "rk8v4", "rk4v4",
+                                   "rk4v4-e8", "rk2v4-e8"});
     case Field::SpecBackend:
         return enumeration(value, {"none", "mtp", "dflash", "dflash2"});
     case Field::ProposalHead:
