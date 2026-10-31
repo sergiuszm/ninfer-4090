@@ -403,24 +403,31 @@ escaped exception as exit 1 (as PID 1 of a container, the abort ended as SIGSEGV
 Keep both until upstream fixes the test; both are upstream PR candidates.
 
 Upstream backport, capture status (2026-10-31, GPU window 6): the `prefix_real` default scenario
-hung in `EngineCore::prepare_semantic_capture` on the first request of its no-MTP engines. When
-the checkpoint catalog could not reserve a slot, `reserve_capture_destination` returned the same
-`false` as for a missing State destination, `prepare_capture` answered with a ready device State
-quote, `ResourceManager::reclaim` returned `Retry`, and the loop never left its scheduling cycle
-(no progress, no deadlines, `/health` 200). Upstream fixed it after our target in `76b5370bd`
-(`neroued/dev`, 2026-10-30). `74110486` ports only its capture-status part (`Ready`,
-`NeedsContext`, `Unavailable`; the optional capture is skipped on `Unavailable`), without the
-perf rework and its `SharedCandidateEvidence` fields; `88fac6c1` ports its
-`capture_without_metadata` native transaction test. Drop both when the catch-up target contains
-`76b5370bd`. `49ab6e92` is a fork-local test geometry fix: on the Qwen3.8 artifact the
-`host_restore` pressure request did not displace the retained checkpoints, so it now fills
-`max_context`. It is an upstream test issue.
-`f4041033` is a fork-local follow-up found in the backport review, and upstream `neroued/dev`
-has the same gap. A new catalog segment can take the metadata that the State destination needs.
+hung in `EngineCore::prepare_semantic_capture` on the first request of its no-MTP engines. When the
+checkpoint catalog could not reserve a slot, `reserve_capture_destination` returned the same `false`
+as for a missing State destination, `prepare_capture` answered with a ready device State quote,
+`ResourceManager::reclaim` returned `Retry`, and the loop never left its scheduling cycle (no
+progress, no deadlines, `/health` 200). Upstream fixed it after our target in `76b5370bd`
+(`neroued/dev`, 2026-10-30). `74110486` ports only its capture-status part (`Ready`, `NeedsContext`,
+`Unavailable`; the optional capture is skipped on `Unavailable`), without the perf rework and its
+`SharedCandidateEvidence` fields; `88fac6c1` ports its `capture_without_metadata` native transaction
+test. Drop both when the catch-up target contains `76b5370bd`.
+
+`host_restore` is an upstream test issue with no fork change (`49ab6e92` tried a `max_context`
+pressure request and was reverted in `dea865d5`). GPU windows 6 and 8 give the same result with a
+262- and a 510-token pressure request: `state_objects 2->2`, nothing backed up, device live
+330,190,848 bytes of a 769,771,520-byte (5-block) capacity. The exact working-set capacity holds
+both retained State images beside any uncached request; a request with reuse off publishes no
+captures and never needs the working set's extra State destinations. Out of our gate; an upstream
+report candidate.
+
+`f4041033` is a fork-local follow-up found in the backport review, and upstream `neroued/dev` has
+the same gap. A new catalog segment can take the metadata that the State destination needs.
 Cancelling the points returns that metadata, and the State quote is then ready again. The
-reservation now re-assesses the State after cancelling the points: ready means `Unavailable`
-(skip), anything else `NeedsContext`. Keep `f4041033` until upstream has an equivalent; it is an
-upstream PR candidate.
+reservation now re-assesses the State after cancelling the points: ready means `Unavailable` (skip),
+anything else `NeedsContext`. Keep `f4041033` until upstream has an equivalent; it is an upstream PR
+candidate.
+
 `e6d965ff` is a fork fix of an upstream bug (in `1882c6ad` and `neroued/dev`), found in the same
 review. With Host victims, the capture destination descriptor is reserved before the victims are
 released, and the Host assessment does not count it. A short descriptor or metadata budget threw out
