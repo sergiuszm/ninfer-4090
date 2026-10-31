@@ -13,6 +13,8 @@
 #include "ops/softmax_attention/dense/causal_cache/nvfp4/launch.h"
 #include "ops/softmax_attention/dense/causal_cache/k8v4/plan.h"
 #include "ops/softmax_attention/dense/causal_cache/k8v4/launch.h"
+#include "ops/softmax_attention/dense/causal_cache/e8/plan.h"
+#include "ops/softmax_attention/dense/causal_cache/e8/launch.h"
 
 #include <algorithm>
 #include <cmath>
@@ -183,6 +185,14 @@ void validate_batched_attention_tensors(const Tensor& q, const Tensor& positions
     }
 }
 
+// Fork-local (rtx4090-port): the k8v4 family is the last explicit branch. A storage that no
+// family claims is refused here, so a fork storage can never run on the k8v4 kernels.
+void require_k8v4_storage(KvCacheStorage storage, const char* op) {
+    if (storage != KvCacheStorage::Fp8KeyNvfp4Value) {
+        throw std::logic_error(std::string(op) + ": no attention family serves this KV storage");
+    }
+}
+
 } // namespace
 
 std::size_t causal_softmax_attention_workspace_capacity_bytes(
@@ -220,6 +230,11 @@ std::size_t causal_softmax_attention_workspace_capacity_bytes(
         return detail::nvfp4_kv_workspace_bytes(q_heads, batch_size, min_width, max_width, envelope,
                                                 multiprocessor_count);
 
+    if (kv_storage_is_fork_mode(cache_storage))
+        return detail::e8_kv_workspace_bytes(q_heads, batch_size, min_width, max_width, envelope,
+                                             multiprocessor_count);
+
+    require_k8v4_storage(cache_storage, "causal_softmax_attention workspace");
     return detail::k8v4_kv_workspace_bytes(q_heads, batch_size, min_width, max_width, envelope,
                                            multiprocessor_count);
 }
@@ -272,6 +287,13 @@ void causal_softmax_attention(const Tensor& q, const Tensor& k, const Tensor& v,
         return;
     }
 
+    if (kv_storage_is_fork_mode(cache.storage)) {
+        detail::e8_kv_append_attention(q, k, v, positions, valid_columns, kv_table_rows, scale,
+                                       cache, envelope, workspace, out, execution);
+        return;
+    }
+
+    require_k8v4_storage(cache.storage, op);
     detail::k8v4_kv_append_attention(q, k, v, positions, valid_columns, kv_table_rows, scale, cache,
                                      envelope, workspace, out, execution);
 }
@@ -314,6 +336,13 @@ void causal_softmax_attention_cached(const Tensor& q, const Tensor& positions,
         return;
     }
 
+    if (kv_storage_is_fork_mode(cache.storage)) {
+        detail::e8_kv_cached_attention(q, positions, scale, cache, envelope, workspace, out,
+                                       execution);
+        return;
+    }
+
+    require_k8v4_storage(cache.storage, op);
     detail::k8v4_kv_cached_attention(q, positions, scale, cache, envelope, workspace, out,
                                      execution);
 }
