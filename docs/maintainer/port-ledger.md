@@ -409,6 +409,11 @@ is in [rtx4090-serve-line.md](rtx4090-serve-line.md):
 | PR #14 tolerant tool calls | deferred | A redesign on this upstream (the Qwen tool decoder streams). Decided with the tool-constraint default |
 | Review fixes | `60bc3f0f`, `6bfadb18`, `da1028b0`, `92985b91`, `5edf2cbf`, `5bd31d22`, `17d3b2b6`, `0aef1bb4`, `aa650caf`, `0d1e39e9`, `6f2cbe59` | Multi-rank deployments refuse a custom thinking control before any worker starts (the rank wire does not carry it). `/slots` rows are leases released with the request. The effort map applies only to the artifact's own template. Startup reports the control length. The serve line mounts the build directory and the v3 artifact |
 
+Integration (2026-10-31): `catchup4b` merges stage 2 (`4b487cc1`) and stage 3 (`d60aeaf0`) on the
+serve merge `c49082f7`. Clean sm_89 build with tests, apps and benches: 1432 targets, 0 errors,
+warnings only at 7 upstream sites. 29 CPU tests pass; the prefill workspace test skips without an
+artifact. GPU window 3 (production shape) is pending.
+
 ## Community triage 2026-10-07, round 4 (PR #14)
 
 T-Crypt answered the round-3 P1 with `e7495e6c` on 2026-10-06. The commit implements the rule that
