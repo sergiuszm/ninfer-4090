@@ -104,6 +104,8 @@ constexpr FieldSpec kFields[] = {
      Scope::Serve},
     {Field::MaxRequestSize, "server.max_request_size", "--max-request-size", "", "SIZE",
      "HTTP body limit before JSON parsing (384MiB).", Scope::Serve, ConfigurationUnit::Bytes},
+    {Field::ToolConstraints, "server.tool_constraints", "--tool-constraints", "", "auto|basic",
+     "Tool constraints when a request omits tool_constraints (auto).", Scope::Serve},
     {Field::ResponseRecords, "server.responses.max_records", "--response-store-max-records", "",
      "N", "Responses store record limit (1024).", Scope::Serve},
     {Field::ResponseSize, "server.responses.max_size", "--response-store-max-size", "", "SIZE",
@@ -390,6 +392,8 @@ FieldValue parse_field_value(Field field, const RawValue& value, bool command_li
         return enumeration(value, {"none", "mtp", "dflash", "dflash2"});
     case Field::ProposalHead:
         return enumeration(value, {"full", "optimized"});
+    case Field::ToolConstraints:
+        return enumeration(value, {"auto", "basic"});
     case Field::ReasoningEffort:
         return enumeration(value, {"none", "minimal", "low", "medium", "high", "xhigh", "max"});
     case Field::ConstraintKind:
