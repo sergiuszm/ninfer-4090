@@ -71,6 +71,7 @@ int run_append_case(CudaExecutionView execution, const Geometry& geometry, KvCac
         make_bf16_values(kv_elements, test_case.seed + 1u, -amplitude, amplitude);
     std::vector<float> v = make_bf16_values(kv_elements, test_case.seed + 2u, -1.0f, 1.0f);
     inject_codec_edges(geometry, test_case.tokens, k, v);
+    avoid_codec_ties(storage, geometry, test_case.tokens, k);
     std::vector<std::int32_t> positions(static_cast<std::size_t>(test_case.tokens));
     for (std::int32_t token = 0; token < test_case.tokens; ++token) {
         positions[static_cast<std::size_t>(token)] = test_case.base + token;
@@ -161,7 +162,7 @@ int run_append_case(CudaExecutionView execution, const Geometry& geometry, KvCac
                                     reference, attention_criterion(storage));
     failures += verify_cache(label, cache.snapshot(), expected);
     if (storage == KvCacheStorage::Nvfp4Group16 || storage == KvCacheStorage::Fp8KeyNvfp4Value ||
-        storage == KvCacheStorage::RK4V4E8) {
+        kv_storage_is_fork_mode(storage)) {
         DeviceCache standalone(initial, mapping, max_context);
         ops::kv_cache_append(tk, tv, tp, standalone.view(),
                              ninfer::test::cuda_environment().default_execution);
@@ -323,6 +324,7 @@ int run_batch_case(CudaExecutionView execution, const Geometry& geometry, KvCach
     auto k = make_bf16_values(kv_column_elements * columns, test_case.seed + 1u, -.25f, .25f);
     auto v = make_bf16_values(kv_column_elements * columns, test_case.seed + 2u, -1.f, 1.f);
     inject_codec_edges(geometry, columns, k, v);
+    avoid_codec_ties(storage, geometry, columns, k);
     std::vector<HostCache> initial;
     // Cover every replay's live prefix plus a writable-tail guard; future table capacity does
     // not require generating, encoding or copying nonexistent KV rows.

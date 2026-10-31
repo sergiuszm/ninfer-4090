@@ -446,7 +446,7 @@ void add_storage_cases(OpSuite& suite, KvCacheStorage storage) {
         add_rk4v4e8_cases(suite);
     }
     if (storage == KvCacheStorage::BFloat16 || storage == KvCacheStorage::Int8Group64 ||
-        storage == KvCacheStorage::RK4V4E8)
+        kv_storage_is_fork_mode(storage))
         for (const auto& geometry : kGeometries) add_geometry(suite, geometry, storage);
     if (storage != KvCacheStorage::BFloat16) {
         add_quantized_causal_cases(suite, storage);
@@ -471,7 +471,9 @@ void add_storage_cases(OpSuite& suite, KvCacheStorage storage) {
 void add_cases(OpSuite& suite) {
     for (auto storage : {KvCacheStorage::BFloat16, KvCacheStorage::Int8Group64,
                          KvCacheStorage::Fp8E4m3fnGroup128Ue8m0, KvCacheStorage::Nvfp4Group16,
-                         KvCacheStorage::Fp8KeyNvfp4Value, KvCacheStorage::RK4V4E8}) {
+                         KvCacheStorage::Fp8KeyNvfp4Value,
+                         KvCacheStorage::RotatedInt8KeyInt4ValueGroup64, KvCacheStorage::RK4V4E8,
+                         KvCacheStorage::RK2V4E8}) {
         if (kv_cache_storage_runs_on_target(storage)) {
             add_storage_cases(suite, storage);
             continue;

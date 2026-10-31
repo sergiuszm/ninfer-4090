@@ -134,12 +134,12 @@ DeviceCache::DeviceCache(const HostCache& cache, MappingPattern mapping,
         upload_plane(packed_, 1, v_physical.data(), v_physical.size());
         upload_plane(packed_, 2, ks_physical.data(), ks_physical.size() * sizeof(std::uint8_t));
         upload_plane(packed_, 3, vs_physical.data(), vs_physical.size());
-    } else if (storage_ == KvCacheStorage::RK4V4E8) {
+    } else if (kv_storage_is_fork_mode(storage_)) {
         const auto k_physical =
-            scatter_paged(cache.k_i4, kI4CodeBytes, geometry_, logical_capacity_,
+            scatter_paged(cache.k_fork, layout_.key.code_extent, geometry_, logical_capacity_,
                           block_table_host_, physical_pages_);
         const auto v_physical =
-            scatter_paged(cache.v_i4, kI4CodeBytes, geometry_, logical_capacity_,
+            scatter_paged(cache.v_fork, layout_.value.code_extent, geometry_, logical_capacity_,
                           block_table_host_, physical_pages_);
         const auto ks_physical =
             scatter_paged(cache.k_scale, kQuantGroups, geometry_, logical_capacity_,
@@ -226,15 +226,15 @@ HostCache DeviceCache::snapshot() const {
                                                          logical_capacity_, block_table_host_);
         cache.v_nvfp4_scale = gather_paged<std::uint8_t>(vs_physical, kNvfp4QuantGroups, geometry_,
                                                          logical_capacity_, block_table_host_);
-    } else if (storage_ == KvCacheStorage::RK4V4E8) {
+    } else if (kv_storage_is_fork_mode(storage_)) {
         const auto k_physical  = snapshot_plane<std::uint8_t>(packed_, 0, k_code_elements_);
         const auto v_physical  = snapshot_plane<std::uint8_t>(packed_, 1, v_code_elements_);
         const auto ks_physical = snapshot_plane<std::uint16_t>(packed_, 2, k_scale_elements_);
         const auto vs_physical = snapshot_plane<std::uint16_t>(packed_, 3, v_scale_elements_);
-        cache.k_i4    = gather_paged<std::uint8_t>(k_physical, kI4CodeBytes, geometry_,
+        cache.k_fork  = gather_paged<std::uint8_t>(k_physical, layout_.key.code_extent, geometry_,
                                                    logical_capacity_, block_table_host_);
-        cache.v_i4    = gather_paged<std::uint8_t>(v_physical, kI4CodeBytes, geometry_,
-                                                   logical_capacity_, block_table_host_);
+        cache.v_fork  = gather_paged<std::uint8_t>(v_physical, layout_.value.code_extent,
+                                                   geometry_, logical_capacity_, block_table_host_);
         cache.k_scale = gather_paged<std::uint16_t>(ks_physical, kQuantGroups, geometry_,
                                                     logical_capacity_, block_table_host_);
         cache.v_scale = gather_paged<std::uint16_t>(vs_physical, kQuantGroups, geometry_,
@@ -480,12 +480,12 @@ int BatchDeviceCache::verify(const std::string& label, std::span<const HostCache
         failures +=
             verify_exact((label + " cache-v-scale").c_str(),
                          snapshot_plane<std::uint8_t>(packed_, 3, v_scale_elements_), expected_vs);
-    } else if (storage_ == KvCacheStorage::RK4V4E8) {
+    } else if (kv_storage_is_fork_mode(storage_)) {
         std::vector<std::uint8_t> expected_k(k_code_elements_, 0);
         std::vector<std::uint8_t> expected_v(v_code_elements_, 0);
         std::vector<std::uint16_t> expected_ks(k_scale_elements_, 0);
         std::vector<std::uint16_t> expected_vs(v_scale_elements_, 0);
-        scatter_rk4v4e8_rows(expected, expected_k, expected_v, expected_ks, expected_vs);
+        scatter_fork_rows(expected, expected_k, expected_v, expected_ks, expected_vs);
         failures +=
             verify_exact((label + " cache-k-code").c_str(),
                          snapshot_plane<std::uint8_t>(packed_, 0, k_code_elements_), expected_k);
@@ -552,15 +552,16 @@ void BatchDeviceCache::scatter_bf16_rows(std::span<const HostCache> rows,
     }
 }
 
-void BatchDeviceCache::scatter_rk4v4e8_rows(std::span<const HostCache> rows,
-                                            std::vector<std::uint8_t>& k,
-                                            std::vector<std::uint8_t>& v,
-                                            std::vector<std::uint16_t>& ks,
-                                            std::vector<std::uint16_t>& vs) const {
+void BatchDeviceCache::scatter_fork_rows(std::span<const HostCache> rows,
+                                         std::vector<std::uint8_t>& k, std::vector<std::uint8_t>& v,
+                                         std::vector<std::uint16_t>& ks,
+                                         std::vector<std::uint16_t>& vs) const {
     for (std::size_t row = 0; row < rows_; ++row) {
         const std::span<const std::int32_t> table = row_table(row);
-        scatter_paged_into(rows[row].k_i4, kI4CodeBytes, geometry_, logical_capacity_, table, k);
-        scatter_paged_into(rows[row].v_i4, kI4CodeBytes, geometry_, logical_capacity_, table, v);
+        scatter_paged_into(rows[row].k_fork, layout_.key.code_extent, geometry_, logical_capacity_,
+                           table, k);
+        scatter_paged_into(rows[row].v_fork, layout_.value.code_extent, geometry_,
+                           logical_capacity_, table, v);
         scatter_paged_into(rows[row].k_scale, kQuantGroups, geometry_, logical_capacity_, table,
                            ks);
         scatter_paged_into(rows[row].v_scale, kQuantGroups, geometry_, logical_capacity_, table,
@@ -569,12 +570,12 @@ void BatchDeviceCache::scatter_rk4v4e8_rows(std::span<const HostCache> rows,
 }
 
 void BatchDeviceCache::upload_rows(std::span<const HostCache> rows) {
-    if (storage_ == KvCacheStorage::RK4V4E8) {
+    if (kv_storage_is_fork_mode(storage_)) {
         std::vector<std::uint8_t> physical_k(k_code_elements_, 0);
         std::vector<std::uint8_t> physical_v(v_code_elements_, 0);
         std::vector<std::uint16_t> physical_ks(k_scale_elements_, 0);
         std::vector<std::uint16_t> physical_vs(v_scale_elements_, 0);
-        scatter_rk4v4e8_rows(rows, physical_k, physical_v, physical_ks, physical_vs);
+        scatter_fork_rows(rows, physical_k, physical_v, physical_ks, physical_vs);
         upload_plane(packed_, 0, physical_k.data(), physical_k.size());
         upload_plane(packed_, 1, physical_v.data(), physical_v.size());
         upload_plane(packed_, 2, physical_ks.data(), physical_ks.size() * sizeof(std::uint16_t));

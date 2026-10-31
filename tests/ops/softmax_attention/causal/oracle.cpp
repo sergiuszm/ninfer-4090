@@ -25,8 +25,8 @@ std::vector<double> ideal_attention(const std::vector<float>& q, const HostCache
                                     const std::vector<std::int32_t>& positions) {
     const Geometry& geometry = cache.geometry;
     const int tokens = positions.size(), visible = positions.back() + 1;
-    // Fork-local rk4v4-e8 rotates each 64-dimension group (H64) instead of the whole d256 row.
-    const bool group_rotation = cache.storage == KvCacheStorage::RK4V4E8;
+    // Fork-local storages rotate each 64-dimension group (H64) instead of the whole d256 row.
+    const bool group_rotation = kv_storage_is_fork_mode(cache.storage);
     const bool rotate_q       = cache.storage != KvCacheStorage::BFloat16 && !group_rotation;
     const bool rotate_v       = cache.storage == KvCacheStorage::Nvfp4Group16 ||
                                 cache.storage == KvCacheStorage::Fp8KeyNvfp4Value;
@@ -91,11 +91,12 @@ ReductionCriterion attention_criterion(KvCacheStorage storage) {
     if (storage == KvCacheStorage::Fp8E4m3fnGroup128Ue8m0) return kAttentionFp8Criterion;
     if (storage == KvCacheStorage::Nvfp4Group16) return kAttentionNvfp4Criterion;
     if (storage == KvCacheStorage::Fp8KeyNvfp4Value) return kAttentionK8V4Criterion;
-    // rk4v4-e8 reaches the same int8 tensor-core arithmetic as int8-g64: the stored K/V codes
-    // are decoded exactly and only the private Q int8 quantization and FP16 P/V staging remain.
-    // On the 267 cases both storages ran on catchup4, its relative L2 error was 1.01x int8's
-    // (median, 1.20x max), so it shares the int8 criterion.
-    if (storage == KvCacheStorage::RK4V4E8) return kAttentionInt8Criterion;
+    // The fork storages reach the same int8 tensor-core arithmetic as int8-g64: the stored K/V
+    // codes are decoded exactly (INT8, INT4, E8 lattice or E8 root keys to int8 codes) and only
+    // the private Q int8 quantization and FP16 P/V staging remain. On the 267 cases both storages
+    // ran on catchup4, the rk4v4-e8 relative L2 error was 1.01x int8's (median, 1.20x max), so
+    // the fork storages share the int8 criterion.
+    if (kv_storage_is_fork_mode(storage)) return kAttentionInt8Criterion;
     throw std::logic_error("unregistered causal-attention test storage");
 }
 
