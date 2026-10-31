@@ -466,7 +466,18 @@ void add_storage_cases(OpSuite& suite, KvCacheStorage storage) {
 void add_cases(OpSuite& suite) {
     for (auto storage : {KvCacheStorage::BFloat16, KvCacheStorage::Int8Group64,
                          KvCacheStorage::Fp8E4m3fnGroup128Ue8m0, KvCacheStorage::Nvfp4Group16,
-                         KvCacheStorage::Fp8KeyNvfp4Value, KvCacheStorage::RK4V4E8})
-        if (kv_cache_storage_runs_on_target(storage)) add_storage_cases(suite, storage);
+                         KvCacheStorage::Fp8KeyNvfp4Value, KvCacheStorage::RK4V4E8}) {
+        if (kv_cache_storage_runs_on_target(storage)) {
+            add_storage_cases(suite, storage);
+            continue;
+        }
+        // Fork-local (rtx4090-port): a storage this target refuses keeps one declared case, so its
+        // --format run reports a skip (77) instead of an empty selection.
+        const std::string format = kv_cache_storage_name(storage);
+        suite.add(
+            "causal_unsupported/" + format,
+            []() -> int { throw OpTestSkip("KV storage refused on this target"); },
+            {{"format", format}});
+    }
 }
 } // namespace ninfer::test::causal_attention
