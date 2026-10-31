@@ -1,7 +1,5 @@
 #include "models/common/parallel_wire.h"
 
-#include <stdexcept>
-
 namespace ninfer::models {
 namespace {
 using distributed::wire::Encoder;
@@ -117,11 +115,6 @@ std::vector<ParameterAssembly> decode_assemblies(Decoder& in) {
 }
 
 void encode_rank_options(Encoder& out, const EngineOptions& o) {
-    // Each rank binds its control tokens from the artifact, so a custom body would size the
-    // coordinator and rank control work differently. Refused until the wire carries it.
-    if (o.thinking_control)
-        throw std::invalid_argument(
-            "a custom thinking control is not supported by multi-rank deployments");
     out.u8(static_cast<std::uint8_t>(o.purpose));
     out.u32(o.max_context);
     out.u32(o.max_concurrency);

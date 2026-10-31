@@ -1,3 +1,4 @@
+#include "ninfer/engine.h"
 #include "product/config/options.h"
 #include "serve/translate.h"
 #include "serve/openai_chat.h"
@@ -168,6 +169,18 @@ void test_thinking_control() {
             "--thinking-control model did not select the model default");
     rejects([] { (void)parse({"ninfer-serve", "model.ninfer", "--thinking-control", ""}); });
     rejects([] { (void)parse({"ninfer-serve", "model.ninfer", "--thinking-control"}); });
+
+    // The rank wire does not carry a custom control: the Engine refuses it for a multi-rank
+    // deployment before it reads the artifact or starts any worker.
+    auto engine = custom.launch.engine;
+    engine.deployment.emplace();
+    engine.deployment->ranks = {{.rank = 0}, {.rank = 1}};
+    std::string message;
+    try {
+        ninfer::Engine refused(engine);
+    } catch (const std::invalid_argument& error) { message = error.what(); }
+    require(message.find("multi-rank") != std::string::npos,
+            "a multi-rank deployment accepted a custom thinking control");
 }
 
 void test_provenance() {

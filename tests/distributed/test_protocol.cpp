@@ -13,7 +13,6 @@
 
 #include <algorithm>
 #include <iostream>
-#include <stdexcept>
 #include <thread>
 
 namespace {
@@ -191,14 +190,6 @@ void model_preparation() {
     wire::Encoder qr;
     q::encode_rank_load(qr, qd);
     require(std::move(qr).take() == qb, "shared rank serialization changed Qwen preparation");
-    // Ranks bind the artifact control; a custom body must not start a mismatched deployment.
-    qwen.options.thinking_control = "custom guidance";
-    bool refused                  = false;
-    try {
-        wire::Encoder custom;
-        q::encode_rank_load(custom, qwen);
-    } catch (const std::invalid_argument&) { refused = true; }
-    require(refused, "a custom thinking control crossed the rank wire");
 
     glm::RankResourceDescription r{};
     r.rank                          = 1;
