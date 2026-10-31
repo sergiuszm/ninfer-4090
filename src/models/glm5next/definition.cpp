@@ -2,6 +2,8 @@
 
 #include "models/glm5next/load/bindings.h"
 
+#include <stdexcept>
+
 namespace ninfer::models::glm5next {
 
 struct ModelDefinition::Impl {
@@ -61,6 +63,9 @@ ops::WeightInput ModelDefinition::input(WeightId id) const {
 
 std::shared_ptr<const ModelDefinition> read_definition(const artifact::Reader& reader,
                                                        LoadOptions options) {
+    // The GLM5Next control is the bare close marker; it has no body to replace.
+    if (options.thinking_control)
+        throw std::invalid_argument("GLM5Next does not support a custom thinking control");
     auto out         = std::make_unique<ModelDefinition::Impl>();
     out->artifact_id = reader.artifact_id();
     out->options     = options;

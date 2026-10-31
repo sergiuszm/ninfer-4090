@@ -141,7 +141,8 @@ MtpWeights bind_mtp(Bindings& b, const TextConfig& c, const TextWeights& main,
     return out;
 }
 
-qwen::FrontendResources bind_resources(artifact::Binder& binder, const Config& c) {
+qwen::FrontendResources bind_resources(artifact::Binder& binder, const Config& c,
+                                       const LoadOptions& options) {
     const auto resource = [&](const char* component, const char* name) {
         const auto bytes = binder.resource_bytes(binder.resource(component, name));
         return std::string_view(reinterpret_cast<const char*>(bytes.data()), bytes.size());
@@ -157,7 +158,7 @@ qwen::FrontendResources bind_resources(artifact::Binder& binder, const Config& c
         out.video_preprocessor_config_json = resource("vision", "video_preprocessor_config.json");
         media = {c.vision->patch_size, c.vision->temporal_patch_size, c.vision->spatial_merge_size};
     }
-    qwen::parse_resources(out, c.text.vocabulary, media);
+    qwen::parse_resources(out, c.text.vocabulary, media, options.thinking_control);
     return out;
 }
 } // namespace ninfer::models::qwen4_exp::loading

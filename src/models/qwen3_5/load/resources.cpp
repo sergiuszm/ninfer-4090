@@ -3,7 +3,8 @@
 
 namespace ninfer::models::qwen3_5::loading {
 
-qwen::FrontendResources bind_resources(artifact::Binder& binder, const Config& config) {
+qwen::FrontendResources bind_resources(artifact::Binder& binder, const Config& config,
+                                       const LoadOptions& options) {
     const auto resource = [&](std::string_view component, std::string_view role) {
         const auto bytes = binder.resource_bytes(binder.resource(component, role));
         return std::string_view(reinterpret_cast<const char*>(bytes.data()), bytes.size());
@@ -22,7 +23,7 @@ qwen::FrontendResources bind_resources(artifact::Binder& binder, const Config& c
         const auto& v = *config.vision;
         vision        = {v.patch_size, v.temporal_patch_size, v.spatial_merge_size};
     }
-    qwen::parse_resources(out, config.text.vocab_size, vision);
+    qwen::parse_resources(out, config.text.vocab_size, vision, options.thinking_control);
     if (config.draft && config.draft->dflash2 &&
         config.draft->dflash2->selector_top_k > out.text.public_token_count) {
         throw artifact::ArtifactError("DFlash2 selector_top_k exceeds public token domain");

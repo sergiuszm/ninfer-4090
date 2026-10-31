@@ -67,7 +67,7 @@ std::shared_ptr<const ModelDefinition> read_definition(const artifact::Reader& r
     out->options     = options;
     out->config      = parse_config(reader.directory(), options);
     artifact::Binder binder(reader);
-    out->resources = loading::bind_resources(binder, out->config);
+    out->resources = loading::bind_resources(binder, out->config, options);
     Bindings bindings(binder);
     const auto& text  = out->config.text;
     out->weights.text = loading::bind_text(bindings, text, options);
