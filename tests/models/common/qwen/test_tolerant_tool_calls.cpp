@@ -928,6 +928,24 @@ int test_review1_cases() {
                           s3.diagnostics.recovered_from == Reason::None,
                       "a skipped marker before a returned call was reported as text");
 
+    // R2-1: a call found only by skipping a quoted marker is a recovery: not completed at the
+    // limit.
+    const std::string quoted_ls = "Use <tool_call> tags.\n" + ls;
+    const Decoded n1 = run(failures, "N1", contract, quoted_ls, true, FinishReason::OutputLimit);
+    failures += check(!n1.failed && n1.calls.size() == 1 && complete(n1) == 0,
+                      "a call after a skipped marker was completed at the limit");
+    const Decoded n1b = run(failures, "N1b", contract, quoted_ls);
+    failures += check(recovered(n1b, 1, Reason::MalformedStructure),
+                      "a call after a skipped marker was not recovered at the model stop");
+    // R2-2: prose that names </tool_call> and then <tool_call> opens no call in a value.
+    const std::string prose = "# Format\nA call ends with </tool_call>.\nThe next call starts "
+                              "again with <tool_call>.\nFind values with grep '</parameter>' file.";
+    const Decoded n2        = run(failures, "N2", contract,
+                                  tool_call("write_file", {{"path", "f.md"}, {"content", prose}}));
+    failures +=
+        check(recovered(n2, 1, Reason::MalformedStructure) && argument(n2, 0, "content") == prose,
+              "prose naming both tags blocked a recovery");
+
     // S4: only whitespace before the call; the trailing prose is dropped.
     const Decoded s4 = run(failures, "S4", contract, "\n\n" + ls + "\nDone.");
     failures += check(recovered(s4, 1, Reason::TrailingContent) && s4.content.empty() &&
