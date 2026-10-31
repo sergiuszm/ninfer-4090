@@ -1088,6 +1088,34 @@ int test_selected_template_recovery_boundary() {
     return failures;
 }
 
+int test_reasoning_effort_aliases() {
+    // The 27B template supports xhigh, medium and low only; the frontend maps the other public
+    // tiers like qwen3_8_flash_next.jinja instead of letting the template raise.
+    const auto compiled = fi::CompiledChatTemplate::resolve(reasoning_effort_template_source());
+    const std::vector<fi::ChatMessage> history{chat_message(ninfer::ChatRole::User, "question")};
+    const auto render   = [&](ninfer::ReasoningEffort effort) {
+        return compiled.render(history, {.reasoning_effort = effort}).text;
+    };
+    const auto xhigh = render(ninfer::ReasoningEffort::XHigh);
+    const auto low   = render(ninfer::ReasoningEffort::Low);
+    int failures     = check(xhigh.find("Reasoning effort is set to xhigh") != std::string::npos &&
+                                 low.find("Reasoning effort is set to low") != std::string::npos,
+                             "Qwen3.8 template no longer renders its effort instructions");
+    failures += check(render(ninfer::ReasoningEffort::High) == xhigh &&
+                          render(ninfer::ReasoningEffort::Max) == xhigh,
+                      "high or max effort did not render as xhigh");
+    failures += check(render(ninfer::ReasoningEffort::Minimal) == low,
+                      "minimal effort did not render as low");
+    failures += check(render(ninfer::ReasoningEffort::Medium) != xhigh &&
+                          render(ninfer::ReasoningEffort::Medium) != low,
+                      "medium effort was mapped to another tier");
+    fi::ChatRenderOptions kwargs;
+    kwargs.chat_template_kwargs_json = R"({"reasoning_effort":"high"})";
+    failures += check(compiled.render(history, kwargs).text == xhigh,
+                      "template kwargs effort high did not render as xhigh");
+    return failures;
+}
+
 int test_adjacent_tool_message_boundary() {
     fi::ChatMessage assistant = chat_message(ninfer::ChatRole::Assistant, "");
     assistant.tool_calls.push_back(
@@ -2853,6 +2881,7 @@ int main() {
     failures += test_adjacent_tool_message_boundary();
     failures += test_literal_cache_boundary();
     failures += test_selected_template_recovery_boundary();
+    failures += test_reasoning_effort_aliases();
     failures += test_official_resource_guards();
     failures += test_template_file_execution();
     failures += test_invalid_public_part_enums(frontend);

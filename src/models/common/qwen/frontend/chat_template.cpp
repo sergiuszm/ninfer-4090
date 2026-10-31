@@ -72,12 +72,20 @@ Json template_parameters(const ChatRenderOptions& options, const Json& special_t
             throw std::invalid_argument("invalid reasoning_effort template parameter");
         }
         const bool thinking = effort != "none";
+        // Qwen3.8 templates support only xhigh, medium and low. Map the other public tiers the
+        // way qwen3_8_flash_next.jinja does, so artifact templates without that alias block
+        // (the 27B one) do not reject them.
+        const char* alias = effort == "high" || effort == "max" ? "xhigh"
+                            : effort == "minimal"               ? "low"
+                                                                : nullptr;
         if (context.contains("enable_thinking") && context["enable_thinking"] != thinking) {
             throw RequestError(RequestErrorKind::ConflictingPromptOptions,
                                "reasoning_effort conflicts with enable_thinking",
                                "reasoning_effort");
         }
+        // Inserting a key can move the elements of the ordered context; effort is not used after.
         context["enable_thinking"] = thinking;
+        if (alias) context["reasoning_effort"] = alias;
     }
     if (!context.contains("enable_thinking") && options.defaults.enable_thinking)
         context["enable_thinking"] = *options.defaults.enable_thinking;
