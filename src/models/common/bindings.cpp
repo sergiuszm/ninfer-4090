@@ -2,6 +2,7 @@
 
 #include "artifact/views.h"
 
+#include <algorithm>
 #include <cmath>
 
 namespace ninfer::models {
@@ -22,6 +23,15 @@ WeightId Bindings::parameter(std::string name, artifact::Shape shape,
     }
     PendingWeight pending;
     pending.reference = binder.parameter(name, std::move(shape), exact_format);
+    // Fork-local (PR #15): the groupwise Q4/Q5 Ops implement an A8 permission as group-64 INT8
+    // activations. Only the startup choice LoadOptions::prefill_activations selects them (the
+    // Qwen3.5 dense-body prefill rule), never a declared permission, so these uses bind as
+    // A16Only on every build.
+    const auto& parts    = pending.reference.binding.parts;
+    const bool groupwise = std::any_of(parts.begin(), parts.end(), [&](const auto& part) {
+        const auto format = binder.reader().geometry(part.object).format;
+        return format == QType::Q4_G64_FP16 || format == QType::Q5_G64_FP16;
+    });
     for (const auto& input : inputs) {
         const auto& use = binder.use(name, input);
         if (!use.activation_policy) {
@@ -49,6 +59,7 @@ WeightId Bindings::parameter(std::string name, artifact::Shape shape,
             break;
 #endif
         }
+        if (groupwise) result.policy = ops::LinearPolicy::A16Only;
         for (const auto& [role, binding] : use.auxiliaries) {
             if (role != "activation_input_divisor") {
                 throw artifact::ArtifactError(name + "@" + input + ": unknown auxiliary " + role);
