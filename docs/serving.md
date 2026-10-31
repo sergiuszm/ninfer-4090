@@ -1273,8 +1273,8 @@ This fork changes the serve behaviors below. The production line is in
   interrupted end stay complete; production returned all output as text. **Residual risk, by
   design:** an example call followed only by prose runs, because it is the same as a real call
   followed by prose. The prose after it is dropped, so the client sees only the call; operators
-  see `dropped_trailing_bytes`. **Recovered values are a best guess:** a value that contains a complete fake
-  parameter sequence can split there.
+  see `dropped_trailing_bytes`. **Recovered values are a best guess:** a value that contains a
+  complete fake parameter sequence can split there.
 - **Effort map.** Before it renders the artifact's own template, the Qwen frontend maps `high`
   and `max` to `xhigh` and `minimal` to `low`, as the Flash-Next template does. The Qwen3.8-27B
   template supports only `xhigh`, `medium` and `low`, so these tiers no longer fail with
