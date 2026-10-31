@@ -860,9 +860,14 @@ EncodedVector encode_prefix_vector(std::span<const std::uint16_t, kFullHeadDim> 
     return encoded;
 }
 
+// Row b of pass p appends at positions 61 + p + 71 b + token, so rows start on different pages and
+// page offsets; a writer that takes another row's positions misplaces bytes. A row with no tokens
+// carries -1 positions and table row in pass 0, and valid metadata of an otherwise unused table
+// row in passes 1 and 2, so a writer that uses it writes bytes the exact comparison catches.
 int full_prefix_case(int kv_heads, KvCacheStorage storage, int width, int batch, bool captured) {
+    constexpr int kRowStride = kPage + 7;
     const auto layout        = test_cache_layout(storage);
-    const int logical_pages  = (width + 70 + kPage - 1) / kPage;
+    const int logical_pages  = (width + 70 + kRowStride * (batch - 1) + kPage - 1) / kPage;
     const int table_rows     = batch + 1;
     const int physical_pages = 2 * logical_pages * table_rows + 1;
     const auto input_count   = static_cast<std::size_t>(kFullHeadDim) * kv_heads * width * batch;
@@ -933,11 +938,13 @@ int full_prefix_case(int kv_heads, KvCacheStorage storage, int width, int batch,
                 storage_buffers[plane].copy_from_host(expected[plane].data(), sizes[plane]);
         }
         for (int row = 0; row < batch; ++row) {
-            const int kind = (row + pass) % 4;
-            counts[row]    = kind == 0 ? 0 : kind == 1 ? 1 : kind == 2 ? width - 2 : width;
-            rows[row]      = counts[row] == 0 ? -1 : (batch - row + pass) % table_rows;
+            const int kind     = (row + pass) % 4;
+            counts[row]        = kind == 0 ? 0 : kind == 1 ? 1 : kind == 2 ? width - 2 : width;
+            const bool invalid = counts[row] == 0 && pass == 0;
+            rows[row]          = invalid ? -1 : (batch - row + pass) % table_rows;
             for (int token = 0; token < width; ++token)
-                positions[row * width + token] = counts[row] == 0 ? -1 : 61 + pass + token;
+                positions[row * width + token] =
+                    invalid ? -1 : 61 + pass + kRowStride * row + token;
             for (int token = 0; token < counts[row]; ++token) {
                 const int position = positions[row * width + token];
                 const int page     = mapping[rows[row] * logical_pages + position / kPage];
