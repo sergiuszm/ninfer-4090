@@ -393,6 +393,14 @@ block, so a Qwen3.8 artifact renders a 58-token thinking prompt, and upstream's 
 only the Qwen3.6 count (16). Keep the 16-or-58 check until upstream updates the golden. The ring
 test stays dropped.
 
+Upstream test bugs in `prefix_real` (2026-10-31, GPU window 3a): `41e50d0d` made
+`ToolConstraintMode::Basic` the default, so a request that declares tools is constrained, and a
+constraint refuses requests without the model EOS stops. Five reuse steps declare tools and count
+a fixed number of outputs with model stops off; the default scenario threw at `rewrite_checkpoints`
+on any model. `bb13087b` gives those steps `ToolConstraintMode::Automatic`. `f0fbfdb0` reports an
+escaped exception as exit 1 (as PID 1 of a container, the abort ended as SIGSEGV, exit 139).
+Keep both until upstream fixes the test; both are upstream PR candidates.
+
 Stage 4 serve line, stages 5 and 6 serve items (on `1882c6ad`, 2026-10-31). The production line
 is in [rtx4090-serve-line.md](rtx4090-serve-line.md):
 
