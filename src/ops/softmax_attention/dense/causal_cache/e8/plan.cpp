@@ -98,13 +98,13 @@ E8KvRoute e8_kv_resolve_route(std::int32_t q_heads, std::int32_t width, std::int
     return width <= small_t_width ? E8KvRoute::SmallT : E8KvRoute::ChunkedSmallT;
 }
 
-std::int32_t e8_kv_chunk_tokens(std::int32_t q_heads, std::int32_t width, std::int32_t batch_size,
-                                CausalAttentionExecutionEnvelope envelope) {
+std::int32_t e8_kv_chunk_tokens(std::int32_t q_heads, std::int32_t width,
+                                std::int32_t batch_size) {
     if (q_heads == 16) { return 6; }
-    // INT8 benefits from 5+4/5 at long contexts.
-    if (batch_size == 1 && width >= 9 && width <= 10 && envelope.max_visible_keys > 4096) {
-        return (width + 1) / 2;
-    }
+    // INT8 benefits from 5+4/5 at long contexts. rtx4090-port took 8+1/8+2 up to 4096 keys; that
+    // changed the kernel instances of the chunk nodes at the envelope boundary, and a workspace
+    // planned above 4096 keys for this width alone did not cover the 8-column chunk below it.
+    if (batch_size == 1 && width >= 9 && width <= 10) { return (width + 1) / 2; }
     return 8;
 }
 
@@ -154,7 +154,7 @@ std::size_t e8_kv_workspace_bytes(std::int32_t q_heads, std::int32_t batch_size,
         if (route == E8KvRoute::Prompt) { return std::size_t{0}; }
         if (route == E8KvRoute::SmallT) { return chunk_capacity(width); }
         std::size_t maximum         = 0;
-        const std::int32_t per_call = e8_kv_chunk_tokens(q_heads, width, batch_size, envelope);
+        const std::int32_t per_call = e8_kv_chunk_tokens(q_heads, width, batch_size);
         for (std::int32_t begin = 0; begin < width; begin += per_call) {
             maximum = std::max(maximum, chunk_capacity(std::min(per_call, width - begin)));
         }

@@ -170,7 +170,7 @@ void e8_kv_append_attention(const Tensor& q, const Tensor& k, const Tensor& v,
     auto scope                = workspace.scope();
     const E8KvRoute route     = e8_kv_resolve_route(q.ne[1], width, batch, envelope);
     if (route == E8KvRoute::ChunkedSmallT) {
-        const std::int32_t per_call = e8_kv_chunk_tokens(q.ne[1], width, batch, envelope);
+        const std::int32_t per_call = e8_kv_chunk_tokens(q.ne[1], width, batch);
         for (std::int32_t begin = 0; begin < width; begin += per_call) {
             const std::int32_t count  = std::min(per_call, width - begin);
             auto chunk_scope          = workspace.scope();
@@ -201,7 +201,7 @@ void e8_kv_cached_attention(const Tensor& q, const Tensor& positions, float scal
     auto scope                = workspace.scope();
     const E8KvRoute route     = e8_kv_resolve_route(q.ne[1], width, 1, envelope);
     if (route == E8KvRoute::ChunkedSmallT) {
-        const std::int32_t per_call = e8_kv_chunk_tokens(q.ne[1], width, 1, envelope);
+        const std::int32_t per_call = e8_kv_chunk_tokens(q.ne[1], width, 1);
         for (std::int32_t begin = 0; begin < width; begin += per_call) {
             const std::int32_t count  = std::min(per_call, width - begin);
             auto chunk_scope          = workspace.scope();

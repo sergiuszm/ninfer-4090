@@ -193,6 +193,11 @@ void add_graph_envelope_cases(OpSuite& suite, KvCacheStorage storage) {
                             MappingPattern::Fragmented, {}, short_limits);
         add_append_case(suite, geometry, storage, {1, 32768, 131072, 966u},
                         MappingPattern::Fragmented, {}, long_limits);
+        // Nine columns cross the 4096-key policy boundary in both directions. The workspace is
+        // planned at 8192 keys and must also cover the replay at 4096 keys.
+        constexpr std::array<std::uint32_t, 4> crossing_limits{2048, 8192, 4096, 8192};
+        add_append_case(suite, geometry, storage, {9, 17, 8192, 968u}, MappingPattern::Fragmented,
+                        {}, crossing_limits);
         BatchAttentionCase replay{16,
                                   {17, 31, 0},
                                   {7, 16, 0},

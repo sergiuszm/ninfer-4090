@@ -18,10 +18,10 @@ enum class E8KvRoute { SmallT, ChunkedSmallT, Prompt };
                                             std::int32_t batch_size,
                                             CausalAttentionExecutionEnvelope envelope);
 
-// Query columns per small-T launch of the chunked route.
+// Query columns per small-T launch of the chunked route. Like the route, it depends on the call
+// shape only, so a graph update across envelopes keeps the kernel instances of every node.
 [[nodiscard]] std::int32_t e8_kv_chunk_tokens(std::int32_t q_heads, std::int32_t width,
-                                              std::int32_t batch_size,
-                                              CausalAttentionExecutionEnvelope envelope);
+                                              std::int32_t batch_size);
 
 // Upper bound of the device-side active-split policy for one small-T launch.
 [[nodiscard]] std::int32_t e8_kv_split_capacity(std::int32_t q_heads, std::int32_t tokens,
