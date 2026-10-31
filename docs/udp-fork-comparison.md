@@ -3,6 +3,11 @@
 Date: 2026-08-17. Their branch: `feat/rtx-4090-sm89-native` at v0.9.0 (`8426c45a`).
 Ours: `rtx4090-port` at `d78df936`.
 
+Flags on this page have their names and meanings at the time of each assessment. Since
+`1882c6ad`, `--kv-capacity` (a token count) is `--context-capacity` (bytes), `--lm-head-draft` is
+`--proposal-head optimized`, and `--vision-max-tokens` is replaced by `--vision-memory-budget`.
+The current RTX 4090 line is in [maintainer/rtx4090-serve-line.md](maintainer/rtx4090-serve-line.md).
+
 Both forks descend from `Don-Chad/ninfer-3090` (merge base `c55c23bb`) and target
 Qwen3.8-27B on a single RTX 4090. The work is largely complementary:
 

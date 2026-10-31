@@ -33,13 +33,18 @@ docker run --rm --gpus all \
   ninfer-3090:sm86 \
   ninfer-serve models/qwen3_8_27b.ninfer \
   --host 0.0.0.0 --port 8080 \
-  --max-context 65536 --kv-capacity 65536 \
+  --max-context 65536 \
   --max-concurrency 1 --max-pending-requests 16 \
   --prefill-chunk 1024 --kv-dtype int8 \
-  --spec mtp --draft-tokens 3 --lm-head-draft
+  --spec mtp --draft-tokens 3 --proposal-head optimized
 ```
 
 The API is available at `http://127.0.0.1:8080/v1`.
+
+The server sizes the KV and State capacity automatically (`--context-capacity auto`). It takes the
+largest capacity that fits after `--memory-headroom` (default 512 MiB). The startup log shows the
+estimated token capacity. To set a fixed capacity, give `--context-capacity` a byte size. The RTX
+4090 production line is in [maintainer/rtx4090-serve-line.md](maintainer/rtx4090-serve-line.md).
 
 ## Native Ubuntu 24.04 build
 
@@ -144,9 +149,9 @@ Run one short generation with the real Qwen3.8 artifact:
 ```bash
 ./build-sm86/apps/ninfer models/qwen3_8_27b.ninfer \
   --prompt "Explain prefill and decode in two sentences." \
-  --max-context 8192 --max-new 32 \
+  --max-context 8192 --max-tokens 32 \
   --kv-dtype int8 \
-  --spec mtp --draft-tokens 3 --lm-head-draft
+  --spec mtp --draft-tokens 3 --proposal-head optimized
 ```
 
 A successful compile does not qualify Linux performance.

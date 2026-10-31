@@ -28,6 +28,19 @@ ninfer-serve qwen3_8_27b.ninfer --max-context 172032 --kv-capacity 172032 \
   --spec mtp --draft-tokens 3 --lm-head-draft --preserve-thinking
 ```
 
+This is the command of the measurement, with the flags of that time. `1882c6ad` removed
+`--kv-capacity` (a token count) and renamed `--lm-head-draft`. The nearest command today follows.
+It is not measured, and its automatic capacity is not the same reservation:
+
+```
+ninfer-serve qwen3_8_27b.ninfer --max-context 172032 --context-capacity auto \
+  --max-concurrency 1 --prefill-chunk 1024 --kv-dtype int8 \
+  --spec mtp --draft-tokens 3 --proposal-head optimized --preserve-thinking
+```
+
+The current production line is in
+[maintainer/rtx4090-serve-line.md](maintainer/rtx4090-serve-line.md).
+
 llama.cpp prefill and no-speculation decode ran through `llama bench`:
 
 ```
