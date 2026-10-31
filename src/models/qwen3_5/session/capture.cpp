@@ -66,7 +66,15 @@ SessionImpl::reserve_capture_destination(std::uint32_t lane, std::uint32_t front
     }
     if (host_victims.empty()) {
         const auto destination = context::reserve_capture_destination(directory, ticket->host);
-        if (!destination) return Status::NeedsContext;
+        if (!destination) {
+            // Fork-local (catch-up #4): a new catalog segment for the points can take the
+            // metadata that the State destination needs. Cancelling the points returns it. If
+            // the State quote is then ready, the catalog was the obstacle, not State capacity.
+            ticket.reset();
+            ContextDemand demand;
+            demand.add_state({.count = 1});
+            return directory.assess(demand).ready() ? Status::Unavailable : Status::NeedsContext;
+        }
         ticket->state = *destination;
     } else {
         const auto released = checkpoint_release_set(host_victims);
