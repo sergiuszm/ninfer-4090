@@ -160,7 +160,8 @@ int run_append_case(CudaExecutionView execution, const Geometry& geometry, KvCac
                                         output_bits, kHeadDim * geometry.q_heads, oracle_queries)),
                                     reference, attention_criterion(storage));
     failures += verify_cache(label, cache.snapshot(), expected);
-    if (storage == KvCacheStorage::Nvfp4Group16 || storage == KvCacheStorage::Fp8KeyNvfp4Value) {
+    if (storage == KvCacheStorage::Nvfp4Group16 || storage == KvCacheStorage::Fp8KeyNvfp4Value ||
+        storage == KvCacheStorage::RK4V4E8) {
         DeviceCache standalone(initial, mapping, max_context);
         ops::kv_cache_append(tk, tv, tp, standalone.view(),
                              ninfer::test::cuda_environment().default_execution);

@@ -1,4 +1,5 @@
 #include "fixture.h"
+#include "ops/fork_cache_reference.h"
 #include "ops/fp8_cache_reference.h"
 
 namespace ninfer::test::causal_attention {
@@ -19,6 +20,11 @@ TestCacheLayout test_cache_layout(KvCacheStorage storage) {
     case KvCacheStorage::Fp8KeyNvfp4Value:
         return {{DType::FP8_E4M3FN, kHeadDim, DType::U8, kFp8QuantGroups},
                 {DType::U8, kNvfp4CodeBytes, DType::U8, kNvfp4QuantGroups}};
+    case KvCacheStorage::RK4V4E8:
+        return {{DType::U8, kI4CodeBytes, DType::FP16, kQuantGroups},
+                {DType::U8, kI4CodeBytes, DType::FP16, kQuantGroups}};
+    default:
+        break;
     }
     throw std::invalid_argument("unsupported test KV storage");
 }
@@ -320,6 +326,18 @@ void encode_rotated_key_row(std::span<const float> source, std::size_t source_ba
     }
 }
 
+namespace {
+
+// Fork-local rk4v4-e8 row through the shared fork host codec (ops/fork_cache_reference.h).
+void encode_rk4v4e8_row(std::span<const float> source, std::size_t source_base, bool key,
+                        std::vector<std::uint8_t>& codes, std::size_t code_base,
+                        std::vector<std::uint16_t>& scales, std::size_t scale_base) {
+    fork_encode_row(source.data() + source_base, fork_vector_codec(KvCacheStorage::RK4V4E8, key),
+                    codes.data() + code_base, scales.data() + scale_base);
+}
+
+} // namespace
+
 HostCache make_cache(const Geometry& geometry, KvCacheStorage storage, std::int32_t max_context,
                      std::uint32_t seed, float qk_amplitude) {
     const std::int32_t logical_capacity = align_up_page(max_context);
@@ -408,6 +426,34 @@ HostCache make_cache(const Geometry& geometry, KvCacheStorage storage, std::int3
                                                        cache.v_nvfp4_scale, v_scale);
                           }
                       });
+        return cache;
+    }
+
+    if (storage == KvCacheStorage::RK4V4E8) {
+        const std::size_t codes =
+            static_cast<std::size_t>(kI4CodeBytes) * logical_capacity * geometry.kv_heads;
+        cache.k_i4.assign(codes, 0);
+        cache.v_i4.assign(codes, 0);
+        cache.k_scale.assign(scale_elements(geometry, logical_capacity), 0);
+        cache.v_scale.assign(scale_elements(geometry, logical_capacity), 0);
+        parallel_rows(
+            geometry.kv_heads * logical_capacity,
+            std::uint64_t(geometry.kv_heads) * logical_capacity * kHeadDim,
+            [&](int first, int last) {
+                for (int row = first; row < last; ++row) {
+                    const int head = row / logical_capacity, position = row % logical_capacity;
+                    const std::size_t source =
+                        cache_index(geometry, logical_capacity, head, position, 0);
+                    const std::size_t code = logical_plane_index(
+                        kI4CodeBytes, geometry, logical_capacity, head, position, 0);
+                    const std::size_t scale =
+                        scale_index(geometry, logical_capacity, head, position, 0);
+                    encode_rk4v4e8_row(logical_k, source, true, cache.k_i4, code, cache.k_scale,
+                                       scale);
+                    encode_rk4v4e8_row(logical_v, source, false, cache.v_i4, code, cache.v_scale,
+                                       scale);
+                }
+            });
         return cache;
     }
 
@@ -529,6 +575,15 @@ void append_cache(HostCache& cache, const std::vector<float>& k, const std::vect
                 encode_fp8_row(v_row, cache.v_fp8, target, cache.v_fp8_scale, scale);
                 continue;
             }
+            if (cache.storage == KvCacheStorage::RK4V4E8) {
+                const std::size_t code = logical_plane_index(
+                    kI4CodeBytes, geometry, cache.logical_capacity, head, position, 0);
+                const std::size_t scale =
+                    scale_index(geometry, cache.logical_capacity, head, position, 0);
+                encode_rk4v4e8_row(k, source, true, cache.k_i4, code, cache.k_scale, scale);
+                encode_rk4v4e8_row(v, source, false, cache.v_i4, code, cache.v_scale, scale);
+                continue;
+            }
             const std::size_t scale =
                 scale_index(geometry, cache.logical_capacity, head, position, 0);
             encode_rotated_key_row(k, source, cache.k_i8, target, cache.k_scale, scale);
@@ -555,6 +610,16 @@ double cache_value(const HostCache& cache, bool key, int head, int position, int
         const auto& codes  = key ? cache.k_i8 : cache.v_i8;
         const auto& scales = key ? cache.k_scale : cache.v_scale;
         return double(codes[index]) *
+               double(f16_bits_to_f32(scales[row * kQuantGroups + d / kQuantGroup]));
+    }
+    if (cache.storage == KvCacheStorage::RK4V4E8) {
+        // Rotated-domain value; ideal_attention applies H64 to Q and to the output.
+        const auto& codes     = key ? cache.k_i4 : cache.v_i4;
+        const auto& scales    = key ? cache.k_scale : cache.v_scale;
+        const auto byte       = codes[row * kI4CodeBytes + d / 2];
+        const unsigned code   = (d & 1) ? byte >> 4 : byte & 15u;
+        const int signed_code = static_cast<int>(code ^ 8u) - 8;
+        return double(signed_code) *
                double(f16_bits_to_f32(scales[row * kQuantGroups + d / kQuantGroup]));
     }
     if (cache.storage == KvCacheStorage::Fp8E4m3fnGroup128Ue8m0 ||
@@ -593,6 +658,11 @@ int verify_cache(const std::string& label, const HostCache& got, const HostCache
         failures += verify_exact((label + " cache-v-code").c_str(), got.v_fp8, expected.v_fp8);
         failures +=
             verify_exact((label + " cache-v-scale").c_str(), got.v_fp8_scale, expected.v_fp8_scale);
+    } else if (expected.storage == KvCacheStorage::RK4V4E8) {
+        failures += verify_exact((label + " cache-k-code").c_str(), got.k_i4, expected.k_i4);
+        failures += verify_exact((label + " cache-k-scale").c_str(), got.k_scale, expected.k_scale);
+        failures += verify_exact((label + " cache-v-code").c_str(), got.v_i4, expected.v_i4);
+        failures += verify_exact((label + " cache-v-scale").c_str(), got.v_scale, expected.v_scale);
     } else if (expected.storage == KvCacheStorage::Fp8KeyNvfp4Value) {
         failures += verify_exact((label + " cache-k-code").c_str(), got.k_fp8, expected.k_fp8);
         failures +=

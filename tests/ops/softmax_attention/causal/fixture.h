@@ -40,6 +40,7 @@ constexpr std::int32_t kFp8QuantGroups   = 2;
 constexpr std::int32_t kNvfp4QuantGroup  = 16;
 constexpr std::int32_t kNvfp4QuantGroups = kHeadDim / kNvfp4QuantGroup;
 constexpr std::int32_t kNvfp4CodeBytes   = kHeadDim / 2;
+constexpr std::int32_t kI4CodeBytes      = kHeadDim / 2; // Fork rk4v4-e8 K (E8 lattice) and V.
 constexpr float kAttentionScale          = 0.0625f;
 constexpr std::uint16_t kOutputCanary    = 0x7fc1u;
 
@@ -258,6 +259,9 @@ struct HostCache {
     std::vector<std::uint8_t> v_nvfp4;
     std::vector<std::uint8_t> k_nvfp4_scale;
     std::vector<std::uint8_t> v_nvfp4_scale;
+    // Fork-local rk4v4-e8 packed codes; its FP16 G64 scales use k_scale/v_scale.
+    std::vector<std::uint8_t> k_i4;
+    std::vector<std::uint8_t> v_i4;
 };
 
 void encode_group(std::span<const float> source, std::size_t source_base,
@@ -359,6 +363,10 @@ private:
 
     void scatter_bf16_rows(std::span<const HostCache> rows, std::vector<std::uint16_t>& k,
                            std::vector<std::uint16_t>& v) const;
+
+    void scatter_rk4v4e8_rows(std::span<const HostCache> rows, std::vector<std::uint8_t>& k,
+                              std::vector<std::uint8_t>& v, std::vector<std::uint16_t>& ks,
+                              std::vector<std::uint16_t>& vs) const;
 
     void upload_rows(std::span<const HostCache> rows);
 
