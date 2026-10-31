@@ -100,6 +100,11 @@ struct ServeOptions {
     ToolConstraintMode tool_constraints = ToolConstraintMode::Automatic;
 };
 
+// Option and protocol spelling of a tool-constraint mode.
+[[nodiscard]] constexpr std::string_view tool_constraints_name(ToolConstraintMode mode) noexcept {
+    return mode == ToolConstraintMode::Basic ? "basic" : "auto";
+}
+
 [[nodiscard]] CliOptions parse_cli_options(int argc, char** argv);
 [[nodiscard]] ServeOptions parse_serve_options(int argc, char** argv);
 
