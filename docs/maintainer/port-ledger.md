@@ -428,6 +428,18 @@ of `prepare_capture`, and the engine failed all requests. It now checks the two 
 conditions first and returns `NeedsContext`. Keep it until upstream has an equivalent. It is an
 upstream PR candidate; the user decides later whether to send it.
 
+Upstream budget and test geometry, `late_instructions` and `explicit_anchor_branch` (2026-10-31, GPU
+window 7): with the capture-status port both steps fail their checkpoint-reuse checks instead of
+hanging. Their engine (`explicit_anchor_engine_options`: no MTP, no Host tier, 512 tokens) skips its
+first optional capture. The qwen3_5 plan reserves the catalog in
+`src/models/qwen3_5/planning.cpp:127-138` (upstream `bea5a04ec`, 2026-10-26):
+`Checkpoints::metadata_bytes(n) + RecoveryIndex::metadata_bytes(n)`, about 91.6 KB here. The
+measured free metadata before the capture was 91,562 bytes; the first catalog reservation takes
+89,512 bytes (36,864 slab + 52,640 recovery index), and the capture's State destination does not fit
+in the rest. `76b5370bd` changes none of this sizing, so upstream's full commit skips the same
+capture. Both steps are out of our gate; production uses MTP and a Host tier. An upstream report
+candidate; the user decides upstream issues.
+
 Stage 4 serve line, stages 5 and 6 serve items (on `1882c6ad`, 2026-10-31). The production line
 is in [rtx4090-serve-line.md](rtx4090-serve-line.md):
 
