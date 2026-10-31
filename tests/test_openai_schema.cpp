@@ -964,13 +964,23 @@ int test_stream_observations() {
 
 int test_common_objects() {
     int failures      = 0;
-    const Json models = Json::parse(make_models_list("qwen", 7, 240000));
+    const Json models = Json::parse(make_models_list("qwen", 7, 240000, false));
     failures +=
         check(models["data"][0]["id"] == "qwen" && models["data"][0]["max_model_len"] == 240000,
               "models list advertises the configured context limit");
-    const Json model = Json::parse(make_model_object("qwen", 7, 240000));
+    const Json model = Json::parse(make_model_object("qwen", 7, 240000, false));
     failures += check(model["max_model_len"] == 240000,
                       "model lookup advertises the configured context limit");
+    // Fork fields: the fleet dashboard reads context_window and the modalities object.
+    failures += check(models["data"][0]["context_window"] == 240000 &&
+                          models["data"][0]["modalities"] == Json{{"vision", false}},
+                      "models list carries context_window and text-only modalities");
+    failures += check(model["context_window"] == 240000 &&
+                          model["modalities"] == Json{{"vision", false}},
+                      "model lookup carries context_window and text-only modalities");
+    const Json vision = Json::parse(make_model_object("qwen", 7, 240000, true));
+    failures += check(vision["modalities"]["vision"] == true,
+                      "model lookup reports loaded Vision");
     const Json error = Json::parse(make_error_body(
         ApiError{.status = 400, .message = "bad", .param = "messages", .code = "invalid"}));
     failures += check(error["error"]["param"] == "messages" && error["error"]["code"] == "invalid",
