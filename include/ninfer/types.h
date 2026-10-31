@@ -276,6 +276,9 @@ struct OutputOptions {
     // Presentation constraint supplied by the protocol adapter. It bounds the model's emitted
     // function-name grammar; it does not require the name to match a currently declared tool.
     std::uint32_t tool_name_max_length = 128;
+    // Fork-local (PR #14): on the free (unconstrained) tool route, the Qwen tool decoder resolves
+    // quoted closing tags and prose around calls by lookahead instead of failing the request.
+    bool tolerant_tool_calls = false;
 };
 
 enum class OutputConstraintKind : std::uint8_t { Grammar, JsonObject, JsonSchema, Choice, Regex };
@@ -369,11 +372,13 @@ struct GeneratedToolCall {
 
 // Free generation can return an unrecognized tool header as text. Once a declared function has
 // started, malformed output is a request error; previously published arguments are never retracted.
+// TrailingContent is reported only as a recovered_from reason (prose after complete calls).
 enum class ToolCallParseFallbackReason : std::uint8_t {
     None,
     MalformedStructure,
     InvalidToolName,
     UndeclaredTool,
+    TrailingContent,
 };
 
 [[nodiscard]] inline constexpr const char*
@@ -387,6 +392,8 @@ tool_call_parse_fallback_reason_name(ToolCallParseFallbackReason reason) noexcep
         return "invalid_tool_name";
     case ToolCallParseFallbackReason::UndeclaredTool:
         return "undeclared_tool";
+    case ToolCallParseFallbackReason::TrailingContent:
+        return "trailing_content";
     }
     return "malformed_structure";
 }
@@ -396,6 +403,8 @@ struct ToolCallParseDiagnostics {
     std::uint32_t structured_call_count         = 0;
     std::uint32_t schema_mismatch_arguments     = 0;
     ToolCallParseFallbackReason fallback_reason = ToolCallParseFallbackReason::None;
+    // Tolerant tool calls: the strict failure that a completed response recovered from.
+    ToolCallParseFallbackReason recovered_from = ToolCallParseFallbackReason::None;
 
     [[nodiscard]] friend constexpr bool
     operator==(const ToolCallParseDiagnostics&, const ToolCallParseDiagnostics&) noexcept = default;
