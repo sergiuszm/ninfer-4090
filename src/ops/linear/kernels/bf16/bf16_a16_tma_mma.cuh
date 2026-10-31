@@ -10,6 +10,7 @@
 #include <cuda.h>
 #include <stdexcept>
 #include <string>
+#include <type_traits>
 
 namespace ninfer::ops::detail {
 
@@ -180,11 +181,38 @@ __launch_bounds__(Schedule::kThreads, Schedule::kMinBlocksPerSm) void bf16_a16_t
                                                token_begin, rows, token_offset + count, warp, lane);
 }
 
+#if defined(NINFER_SM86)
+// Fork-local (rtx4090-port): sm_89 has no TMA. A TMA schedule keeps its tile geometry and runs on
+// the cp.async MMA kernel: no producer warp, no barrier storage, the cp.async swizzle.
+template <class Schedule>
+struct Bf16TmaOnCpAsync : Schedule {
+    static constexpr Bf16MmaSwizzle kSwizzle = Bf16MmaSwizzle::Xor64;
+    static constexpr int kThreads            = Schedule::kWarps * 32;
+    static constexpr int kProducerThreads    = 0;
+    static constexpr int kConsumerWarps      = Schedule::kWarps;
+    static constexpr int kSharedBytes =
+        Schedule::kSharedElements * static_cast<int>(sizeof(__nv_bfloat16));
+};
+
+template <class Schedule, int Splits, class Output, class Epilogue>
+void launch_bf16_mma_partitions(const Bf16A16Operands& p, Output output, Epilogue epilogue,
+                                cudaStream_t stream);
+#endif
+
 template <class Schedule, int Splits = 1, class Output, class Epilogue,
           class WeightAccess = Bf16ContiguousTmaWeightAccess>
 void launch_bf16_a16_tma_mma(const Bf16A16Operands& p, Output output, Epilogue epilogue,
                              cudaStream_t stream) {
     static_assert(Splits >= 1 && Splits <= 32);
+#if defined(NINFER_SM86)
+    // Other weight accesses (the Qwen4Exp striped mix) keep the TMA kernel, which traps on sm_89;
+    // startup refuses those models there.
+    if constexpr (std::is_same_v<WeightAccess, Bf16ContiguousTmaWeightAccess>) {
+        launch_bf16_mma_partitions<Bf16TmaOnCpAsync<Schedule>, Splits>(p, output, epilogue,
+                                                                        stream);
+        return;
+    }
+#endif
     if constexpr (Splits > 1) {
         if (p.k % (Schedule::kBlockK * Splits))
             throw std::invalid_argument(

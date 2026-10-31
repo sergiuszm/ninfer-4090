@@ -155,12 +155,18 @@ struct Bf16TmaVectorEpilogue {
                 int token_begin, int rows, int tokens) const {
         constexpr int BR = Schedule::kBlockRows, BT = Schedule::kBlockTokens;
         constexpr int PaddedRows = (BR + 63) / 64 * 64;
+#if defined(NINFER_SM86)
+        // Fork-local: sm_89 runs TMA schedules on the cp.async kernel, which has no producer warp.
+        static_assert(BR % 8 == 0 &&
+                      (Schedule::kProducerThreads == 32 || Schedule::kProducerThreads == 0));
+#else
         static_assert(BR % 8 == 0 && Schedule::kProducerThreads == 32);
+#endif
         auto* tile    = reinterpret_cast<__nv_bfloat16*>(scratch);
         const auto at = [&](int row, int token) {
             return tile + token * PaddedRows + (row ^ ((token & 7) << 3));
         };
-        if (threadIdx.x >= Schedule::kProducerThreads) {
+        if (int(threadIdx.x) >= Schedule::kProducerThreads) {
             const int tid  = int(threadIdx.x) - Schedule::kProducerThreads;
             const int warp = tid / 32, lane = tid & 31;
             const int wm = warp / Schedule::kWarpsTokens, wn = warp % Schedule::kWarpsTokens;
