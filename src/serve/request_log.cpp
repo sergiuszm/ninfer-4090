@@ -94,7 +94,8 @@ Json tool_call_parse_json(const ninfer::ToolCallParseDiagnostics& diagnostics) {
                 {"fallback_reason",
                  ninfer::tool_call_parse_fallback_reason_name(diagnostics.fallback_reason)},
                 {"recovered_from",
-                 ninfer::tool_call_parse_fallback_reason_name(diagnostics.recovered_from)}};
+                 ninfer::tool_call_parse_fallback_reason_name(diagnostics.recovered_from)},
+                {"dropped_trailing_bytes", diagnostics.dropped_trailing_bytes}};
 }
 
 std::string tool_choice_name(const ToolChoice& choice) {

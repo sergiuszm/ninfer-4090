@@ -780,18 +780,21 @@ int main() {
     GenerationOutcome recovered_outcome = normalized_tool_outcome;
     recovered_outcome.tool_call_parse.recovered_from =
         ninfer::ToolCallParseFallbackReason::TrailingContent;
+    recovered_outcome.tool_call_parse.dropped_trailing_bytes = 23;
     const Json recovered_done =
         Json::parse(format_request_done_json("serve-test", 3004, context, recovered_outcome));
-    failures +=
-        check(recovered_done.at("result").at("tool_call_parse").at("recovered_from") ==
-                      "trailing_content" &&
-                  recovered_done.at("result").at("tool_call_parse").at("fallback_reason") == "none",
-              "tolerant recovery diagnostics missing from JSONL");
+    failures += check(
+        recovered_done.at("result").at("tool_call_parse").at("recovered_from") ==
+                "trailing_content" &&
+            recovered_done.at("result").at("tool_call_parse").at("fallback_reason") == "none" &&
+            recovered_done.at("result").at("tool_call_parse").at("dropped_trailing_bytes") == 23,
+        "tolerant recovery diagnostics missing from JSONL");
     const std::optional<OperationalRecord> recovered_info =
         render_tool_call_fallback(context, recovered_outcome);
     failures +=
         check(recovered_info && recovered_info->severity == OperationalSeverity::Info &&
-                  recovered_info->message == "req#7 tool markup recovered | trailing content",
+                  recovered_info->message == "req#7 tool markup recovered | trailing content | "
+                                             "trailing text dropped 23 B",
               "tolerant recovery info line is absent or exposes raw content");
 
     const Json error =
