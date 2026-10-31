@@ -402,6 +402,20 @@ on any model. `bb13087b` gives those steps `ToolConstraintMode::Automatic`. `f0f
 escaped exception as exit 1 (as PID 1 of a container, the abort ended as SIGSEGV, exit 139).
 Keep both until upstream fixes the test; both are upstream PR candidates.
 
+Upstream backport, capture status (2026-10-31, GPU window 6): the `prefix_real` default scenario
+hung in `EngineCore::prepare_semantic_capture` on the first request of its no-MTP engines. When
+the checkpoint catalog could not reserve a slot, `reserve_capture_destination` returned the same
+`false` as for a missing State destination, `prepare_capture` answered with a ready device State
+quote, `ResourceManager::reclaim` returned `Retry`, and the loop never left its scheduling cycle
+(no progress, no deadlines, `/health` 200). Upstream fixed it after our target in `76b5370bd`
+(`neroued/dev`, 2026-10-30). `74110486` ports only its capture-status part (`Ready`,
+`NeedsContext`, `Unavailable`; the optional capture is skipped on `Unavailable`), without the
+perf rework and its `SharedCandidateEvidence` fields; `88fac6c1` ports its
+`capture_without_metadata` native transaction test. Drop both when the catch-up target contains
+`76b5370bd`. `49ab6e92` is a fork-local test geometry fix: on the Qwen3.8 artifact the
+`host_restore` pressure request did not displace the retained checkpoints, so it now fills
+`max_context`. It is an upstream test issue.
+
 Stage 4 serve line, stages 5 and 6 serve items (on `1882c6ad`, 2026-10-31). The production line
 is in [rtx4090-serve-line.md](rtx4090-serve-line.md):
 
