@@ -1240,7 +1240,8 @@ This fork changes the serve behaviors below. The production line is in
   `llamacpp:prompt_seconds_total`, `llamacpp:tokens_predicted_total`,
   `llamacpp:tokens_predicted_seconds_total`, `llamacpp:requests_processing` and
   `llamacpp:requests_deferred`. The token counters are computed prefill tokens and committed
-  decode tokens. The seconds are the prefill and decode execution exposure. Deferred requests are
-  the waiting and paused requests. The counters start after warmup, as the `ninfer_` counters do.
+  decode tokens, including forced thinking-control tokens. The seconds are the prefill and
+  decode execution exposure. Deferred requests are the waiting and paused requests. The counters
+  start after warmup, as the `ninfer_` counters do.
 - **Model fields.** `/v1/models` entries also carry `context_window` (the value of
   `max_model_len`) and `modalities` with a `vision` boolean.
