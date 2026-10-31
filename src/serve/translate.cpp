@@ -316,6 +316,7 @@ ninfer::RequestOptions to_request_options(const GenerationRequest& request,
     options.execution.sampling          = resolve_sampling_overrides(request.sampling, server);
     options.output.raw                  = false;
     options.output.tool_name_max_length = static_cast<std::uint32_t>(request.tool_name_max_length);
+    options.output.tolerant_tool_calls  = server.tolerant_tool_calls;
     options.stop.strings.reserve(request.stop_strings.size() *
                                  (request.stop_strings_apply_to_reasoning ? 2U : 1U));
     for (const std::string& stop : request.stop_strings) {

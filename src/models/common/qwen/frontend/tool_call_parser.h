@@ -20,15 +20,23 @@ struct ParsedToolCallOutput {
 
 [[nodiscard]] ParsedToolCallOutput
 parse_qwen_tool_call_output(const std::string& text, std::size_t max_tool_name_length,
-                            const ToolCallOutputContract& contract);
+                            const ToolCallOutputContract& contract, bool tolerant = false);
 
 // Consumes committed model text exactly once. A recognized tool header commits the interpretation;
 // subsequent model-format errors are request-local failures, never a retraction into ordinary text.
 // Arguments and aggregate calls share the same append-only JSON encoding.
+//
+// Fork-local (PR #14): `tolerant` applies on the free route only (an unconstrained contract). A
+// value end is then decided by lookahead before anything after it is published: a `</parameter>`
+// ends the value only before another parameter header or before `</function></tool_call>` whose end
+// is real. Otherwise the close is value text. Prose after the last call and a `<tool_call>` quoted
+// in prose before the first call become content. Interrupted output never completes a call through
+// recovery.
 class ToolCallOutputDecoder final : public models::frontend::BodyDecoder {
 public:
     ToolCallOutputDecoder(std::shared_ptr<const ToolCallOutputContract> contract,
-                          std::size_t max_tool_name_length, bool combined = false);
+                          std::size_t max_tool_name_length, bool combined = false,
+                          bool tolerant = false);
     ~ToolCallOutputDecoder();
     ToolCallOutputDecoder(ToolCallOutputDecoder&&) noexcept;
     ToolCallOutputDecoder& operator=(ToolCallOutputDecoder&&) noexcept;

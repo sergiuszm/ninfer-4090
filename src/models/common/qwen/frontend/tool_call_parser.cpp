@@ -4,6 +4,7 @@
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
+#include <limits>
 #include <optional>
 #include <stdexcept>
 #include <string_view>
@@ -216,6 +217,55 @@ std::size_t suffix_prefix(std::string_view value, std::string_view marker) {
     return 0;
 }
 
+// Fork-local (PR #14) tolerant tool calls.
+// Rejected value ends per call; bounds the lookahead scans on long broken output.
+constexpr std::size_t kMaxRecoveryAttempts = 64;
+
+bool proper_prefix(std::string_view marker, std::string_view text) {
+    return text.size() < marker.size() && marker.starts_with(text);
+}
+
+// A close counts only after an opener: `</tool_call>` and then `<tool_call>` leaves one open. A
+// `<tool_call>` opens only when markup follows it; one followed by text is prose naming the tag.
+bool opens_unclosed(std::string_view value, std::string_view open, std::string_view close) {
+    std::size_t depth = 0;
+    for (auto at = value.find('<'); at != std::string_view::npos; at = value.find('<', at + 1)) {
+        const auto rest   = value.substr(at);
+        std::size_t after = open.size();
+        if (open == kToolOpen) skip_format_whitespace(rest, after);
+        if (rest.starts_with(open) &&
+            (open != kToolOpen || (after < rest.size() && rest[after] == '<')))
+            ++depth;
+        else if (depth && rest.starts_with(close))
+            --depth;
+    }
+    return depth != 0;
+}
+
+// A recovered value must not open a call or function that it does not close: that is a truncated
+// call borrowing the closes of a call quoted inside it. Unbalanced parameter markers are allowed.
+bool opens_unclosed_call(std::string_view value) {
+    return opens_unclosed(value, kToolOpen, kToolClose) ||
+           opens_unclosed(value, kFunctionOpen, kFunctionClose);
+}
+
+// Text after complete calls that is only close markers (a stray duplicate `</tool_call>`) is noise.
+bool only_close_markers(std::string_view text) {
+    std::size_t pos = 0;
+    for (;;) {
+        skip_format_whitespace(text, pos);
+        if (pos == text.size()) return true;
+        if (starts_with_at(text, pos, kToolClose))
+            pos += kToolClose.size();
+        else if (starts_with_at(text, pos, kFunctionClose))
+            pos += kFunctionClose.size();
+        else if (starts_with_at(text, pos, kParamClose))
+            pos += kParamClose.size();
+        else
+            return false;
+    }
+}
+
 } // namespace
 
 class ToolCallOutputDecoder::Impl {
@@ -232,9 +282,20 @@ public:
         Failed
     };
     using Codec = Contract::Encoding;
+    // Fork-local (PR #14): the lookahead verdict on a candidate value end.
+    enum class Verdict { Wait, Text, Close, Trailing, Fail };
 
-    Impl(std::shared_ptr<const Contract> bound, std::size_t max_name)
-        : contract(std::move(bound)), max_name_length(max_name) {}
+    // A nested close followed by structure, held because production tries it after the balanced
+    // close: its pending offset (absolute) and the value state just before it.
+    struct Mark {
+        std::size_t pos = 0, args = 0, buffered = 0;
+        std::string tail;
+    };
+
+    Impl(std::shared_ptr<const Contract> bound, std::size_t max_name, bool tolerant_calls)
+        : contract(std::move(bound)), max_name_length(max_name) {
+        tolerant = tolerant_calls && contract && !contract->constrained;
+    }
 
     void content(std::string value) {
         const auto suppressed = std::min(prefix_bytes, value.size());
@@ -255,6 +316,15 @@ public:
     void arguments(std::string value, bool parameter_complete = false) {
         if (value.empty() && !parameter_complete) return;
         calls.back().arguments_json += value;
+        if (!held) publish(parameter_complete);
+    }
+
+    // Publishes the call's arguments not yet published. A tolerant hold appends without publishing.
+    void publish(bool parameter_complete = false) {
+        const auto& json  = calls.back().arguments_json;
+        std::string value = json.substr(published);
+        published         = json.size();
+        if (value.empty() && !parameter_complete) return;
         if (!events.empty()) {
             if (auto* last = std::get_if<ToolArgumentsDelta>(&events.back());
                 last && last->index == index() && !last->parameter_complete) {
@@ -268,6 +338,7 @@ public:
 
     void end_call(ToolCallStatus status) {
         if (calls.empty() || calls.back().status != ToolCallStatus::InProgress) return;
+        publish();
         calls.back().status = status;
         if (status == ToolCallStatus::Complete) ++diagnostic.structured_call_count;
         events.emplace_back(ToolCallEnd{index(), status});
@@ -278,6 +349,11 @@ public:
             contract->constrained ? models::frontend::ToolOutputErrorKind::ContractViolation
                                   : models::frontend::ToolOutputErrorKind::InvalidModelOutput,
             std::move(message)};
+        // Held (tolerant) arguments are never published.
+        if (!calls.empty() && calls.back().status == ToolCallStatus::InProgress)
+            calls.back().arguments_json.resize(published);
+        held = false;
+        marks.clear();
         end_call(ToolCallStatus::Incomplete);
         state = State::Failed;
         pending.clear();
@@ -288,7 +364,8 @@ public:
     bool fallback_header(FallbackReason reason) {
         if (contract->constrained) return fail("invalid constrained tool header");
         if (!calls.empty()) return fail("invalid tool call header");
-        diagnostic.fallback_reason = reason;
+        // The first strict failure; tolerant mode may already have skipped a quoted marker.
+        if (diagnostic.fallback_reason == FallbackReason::None) diagnostic.fallback_reason = reason;
         content(std::move(preamble));
         flush_pending();
         state = State::Plain;
@@ -377,6 +454,7 @@ public:
     }
 
     bool finish_value() {
+        if (tolerant) call_unclosed = call_unclosed || opens_unclosed_call(value_text());
         if (codec == Codec::BufferedNormalize) {
             const auto value   = trim_format_whitespace(buffered_value);
             const auto encoded = Json::accept(value.begin(), value.end())
@@ -420,7 +498,7 @@ public:
     }
 
     bool step() {
-        if (cursor == pending.size()) return false;
+        if (cursor == pending.size()) return at_end && settle_value();
         const auto input = std::string_view(pending).substr(cursor);
         switch (state) {
         case State::Plain:
@@ -458,6 +536,17 @@ public:
             std::size_t pos = kToolOpen.size();
             skip_format_whitespace(input, pos);
             if (kFunctionOpen.starts_with(input.substr(pos))) return false;
+            // Tolerant: a marker followed by ordinary text before any call is prose naming the tag.
+            // One followed by `<` is an opening attempt, well-formed or not, and is never skipped.
+            if (tolerant && calls.empty() && input[pos] != '<') {
+                if (diagnostic.fallback_reason == FallbackReason::None)
+                    diagnostic.fallback_reason = FallbackReason::MalformedStructure;
+                skip_reason = FallbackReason::MalformedStructure;
+                content(std::exchange(preamble, {}) + std::string(kToolOpen));
+                consume(kToolOpen.size());
+                state = State::Text;
+                return true;
+            }
             if (!starts_with_at(input, pos, kFunctionOpen))
                 return fallback_header(FallbackReason::MalformedStructure);
             pos += kFunctionOpen.size();
@@ -474,7 +563,15 @@ public:
             if (!tool) return fallback_header(FallbackReason::UndeclaredTool);
             if (!contract->parallel && !calls.empty())
                 return fail("multiple tool calls are not allowed");
+            // A committed call replaces the text interpretation of a skipped quoted marker.
+            if (skip_reason != FallbackReason::None)
+                diagnostic.fallback_reason = FallbackReason::None;
+            // The first call after a skipped quoted marker exists only through that recovery.
+            call_reason = calls.empty() ? skip_reason : FallbackReason::None;
             calls.push_back({std::string(name), {}, ToolCallStatus::InProgress});
+            published     = 0;
+            rejections    = 0;
+            call_unclosed = false;
             events.emplace_back(ToolCallStart{index(), std::string(name)});
             arguments("{");
             consume(end + 1);
@@ -494,6 +591,17 @@ public:
                 return true;
             }
             if (input.starts_with(kFunctionClose)) {
+                // A value end already resolved the end of a call with parameters.
+                if (tolerant && names.empty()) {
+                    bool structural    = false;
+                    const auto verdict = resolve(cursor, true, structural);
+                    if (verdict == Verdict::Wait) return false;
+                    if (verdict == Verdict::Fail) return fail(kTrailingCall);
+                    if (verdict == Verdict::Text)
+                        return fail("unexpected text in tool call sequence");
+                    if (verdict == Verdict::Trailing)
+                        note_recovery(FallbackReason::TrailingContent);
+                }
                 arguments("}");
                 consume(kFunctionClose.size());
                 state = State::ToolClose;
@@ -531,7 +639,12 @@ public:
             value_seen    = false;
             buffered_json = false;
             nested        = 0;
-            state         = State::Value;
+            unbalanced    = false;
+            rejected_b    = false;
+            held          = false;
+            marks.clear();
+            mark_index = 0;
+            state      = State::Value;
             begin_value(parameter ? parameter->encoding : Codec::BufferedNormalize);
             return true;
         }
@@ -539,22 +652,26 @@ public:
             const auto delimiter = contract->constrained ? kParameterEnd : kParamClose;
             if (!(quoted &&
                   (codec == Codec::JsonValue || (buffered_json && !contract->constrained)))) {
-                if (input.size() < delimiter.size() && delimiter.starts_with(input)) return false;
+                if (input.size() < delimiter.size() && delimiter.starts_with(input))
+                    return at_end && settle_value();
                 if (input.starts_with(delimiter)) {
                     if (!contract->constrained && nested) {
+                        if (tolerant && !note_nested_close()) return false;
                         --nested;
                         value_bytes(delimiter);
                         consume(delimiter.size());
                         return true;
                     }
+                    if (tolerant) return tolerant_value_end() || (at_end && settle_value());
                     consume(delimiter.size());
                     return finish_value();
                 }
-                if (!contract->constrained && codec != Codec::JsonValue) {
-                    if (kParamOpen.starts_with(input)) return false;
+                // After a rejected balanced end every later close is a candidate in text order.
+                if (!contract->constrained && codec != Codec::JsonValue && !unbalanced) {
+                    if (kParamOpen.starts_with(input)) return at_end && settle_value();
                     if (input.starts_with(kParamOpen)) {
                         const auto end = input.find('>', kParamOpen.size());
-                        if (end == std::string::npos) return false;
+                        if (end == std::string::npos) return at_end && settle_value();
                         if (end > kParamOpen.size()) ++nested;
                         value_bytes(input.substr(0, end + 1));
                         consume(end + 1);
@@ -563,7 +680,7 @@ public:
                 }
             }
             const auto count = codepoint_bytes(input);
-            if (!count) return false;
+            if (!count) return at_end && settle_value();
             value_bytes(input.substr(0, count));
             consume(count);
             return true;
@@ -576,10 +693,28 @@ public:
                 consume(pos);
                 return true;
             }
+            // Tolerant: the lookahead accepted the last call's end before this trailing text. It is
+            // dropped: every protocol has already closed its content before the published call.
+            if (state == State::Between && tolerant && at_end && !input.starts_with(kToolOpen)) {
+                const auto dropped                = trim_format_whitespace(input).size();
+                diagnostic.dropped_trailing_bytes = static_cast<std::uint32_t>(
+                    std::min<std::size_t>(diagnostic.dropped_trailing_bytes + dropped,
+                                          std::numeric_limits<std::uint32_t>::max()));
+                consume(input.size());
+                return true;
+            }
             const auto marker = state == State::ToolClose ? kToolClose : kToolOpen;
             if (marker.starts_with(input) && marker != input) return false;
             if (!input.starts_with(marker)) return fail("unexpected text in tool call sequence");
             if (state == State::ToolClose) {
+                if (tolerant && call_reason != FallbackReason::None) {
+                    if (call_unclosed) return fail("recovered tool call quotes an unclosed call");
+                    // The first recovery of a completed call, as the strict failure it replaced.
+                    if (recovery == FallbackReason::None)
+                        recovery = skip_reason != FallbackReason::None ? skip_reason : call_reason;
+                } else if (tolerant && recovery == FallbackReason::None) {
+                    recovery = skip_reason;
+                }
                 consume(marker.size());
                 end_call(ToolCallStatus::Complete);
                 state = State::Between;
@@ -600,21 +735,26 @@ public:
                 flush_pending();
             else
                 while (step()) {}
-            pending.erase(0, cursor);
-            cursor = 0;
+            // Held marks may rewind the cursor: keep their text.
+            const auto keep = marks.empty() ? cursor : std::min(cursor, marks.front().pos - erased);
+            pending.erase(0, keep);
+            erased += keep;
+            cursor -= keep;
         }
         return std::exchange(events, {});
     }
 
     std::vector<OutputEvent> finish(FinishReason reason) {
         if (finished) throw std::logic_error("tool output decoder is finished");
+        const bool interrupted =
+            reason == FinishReason::OutputLimit || reason == FinishReason::ContextCapacity ||
+            reason == FinishReason::Cancelled || reason == FinishReason::StopString;
+        at_end = true;
+        if (tolerant && interrupted) settle_interrupted();
         auto initial = feed({});
         events       = std::move(initial);
         finished     = true;
         if (failure) return std::exchange(events, {});
-        const bool interrupted =
-            reason == FinishReason::OutputLimit || reason == FinishReason::ContextCapacity ||
-            reason == FinishReason::Cancelled || reason == FinishReason::StopString;
         if (state == State::Text || state == State::Plain)
             content(std::exchange(pending, {}));
         else if (state == State::Header && calls.empty() && !contract->constrained)
@@ -625,7 +765,249 @@ public:
             else
                 end_call(ToolCallStatus::Incomplete);
         }
+        if (!failure && recovery != FallbackReason::None) {
+            diagnostic.recovered_from  = recovery;
+            diagnostic.fallback_reason = FallbackReason::None;
+        }
         return std::exchange(events, {});
+    }
+
+    // ---- Fork-local (PR #14) tolerant tool calls, free route only ----
+
+    static constexpr const char* kTrailingCall = "tool call is followed by text and another call";
+
+    std::string_view value_text() const {
+        if (codec == Codec::BufferedNormalize) return buffered_value;
+        return std::string_view(calls.back().arguments_json).substr(value_offset);
+    }
+
+    void note_recovery(FallbackReason reason) {
+        if (call_reason == FallbackReason::None) call_reason = reason;
+    }
+
+    bool next_parameter_allowed(std::string_view name) const {
+        if (!valid_parameter_name(name) || names.contains(std::string(name))) return false;
+        if (!tool->strict) return true;
+        const auto* next = find_parameter_contract(*tool, name);
+        return next && next - tool->parameters.data() > previous_parameter;
+    }
+
+    // Lookahead from a candidate value end at `at` (a `</parameter>`, or with `function` the
+    // `</function>` of a call without parameters). The value ends before a new parameter header or
+    // before `</function></tool_call>` whose end is real; any other text makes the close value
+    // text. Nothing after the candidate is published before the verdict.
+    // `shallow` decides on the structure alone, without the call-end rule. Whitespace already
+    // skipped for the same candidate is not scanned again.
+    Verdict resolve(std::size_t at, bool function, bool& structural, bool shallow = false) {
+        const std::string_view text = pending;
+        const auto wait             = [&] { return at_end ? Verdict::Text : Verdict::Wait; };
+        const std::size_t key       = at + erased;
+        if (head_scan.key != key)
+            head_scan =
+                HeadScan{.key = key,
+                         .pos = key + (function ? kFunctionClose.size() : kParamClose.size()),
+                         .past_function = function};
+        std::size_t pos = head_scan.pos - erased;
+        text_reason     = FallbackReason::MalformedStructure;
+        skip_format_whitespace(text, pos);
+        head_scan.pos = pos + erased;
+        if (!head_scan.past_function) {
+            const auto rest = text.substr(pos);
+            if (rest.empty() || proper_prefix(kParamOpen, rest) ||
+                proper_prefix(kFunctionClose, rest))
+                return wait();
+            if (rest.starts_with(kParamOpen)) {
+                const auto end = rest.find_first_of("<>\r\n", kParamOpen.size());
+                if (end == std::string_view::npos) return wait();
+                structural = true;
+                if (rest[end] != '>') return Verdict::Text;
+                return next_parameter_allowed(
+                           rest.substr(kParamOpen.size(), end - kParamOpen.size()))
+                           ? Verdict::Close
+                           : Verdict::Text;
+            }
+            if (!rest.starts_with(kFunctionClose)) return Verdict::Text;
+            pos += kFunctionClose.size();
+            head_scan.past_function = true;
+            skip_format_whitespace(text, pos);
+            head_scan.pos = pos + erased;
+        }
+        structural      = true;
+        const auto rest = text.substr(pos);
+        if (rest.empty() || proper_prefix(kToolClose, rest)) return wait();
+        if (!rest.starts_with(kToolClose)) return Verdict::Text;
+        if (shallow) return Verdict::Close;
+        return call_end(key, pos + kToolClose.size());
+    }
+
+    // Production's call-end rule: the end is quoted (Text) when a later `</tool_call>` follows
+    // before the next `<tool_call>` and the text between them is more than close markers. Text and
+    // then `<tool_call>` fails the request; text and then the end of output is trailing content.
+    // The scan resumes where it stopped for the same candidate.
+    Verdict call_end(std::size_t key, std::size_t start) {
+        if (end_scan.key != key) end_scan = EndScan{.key = key, .pos = start + erased};
+        const std::string_view text = pending;
+        std::size_t pos             = end_scan.pos - erased;
+        for (;;) {
+            skip_format_whitespace(text, pos);
+            end_scan.pos = pos + erased;
+            if (pos == text.size()) break;
+            const auto rest = text.substr(pos);
+            if (rest.starts_with(kToolOpen))
+                return end_scan.text || end_scan.markers ? Verdict::Fail : Verdict::Close;
+            std::size_t length = 0;
+            for (const auto marker : {kToolClose, kFunctionClose, kParamClose})
+                if (rest.starts_with(marker)) length = marker.size();
+            if (length) {
+                end_scan.markers = true;
+                end_scan.close   = end_scan.close || rest.starts_with(kToolClose);
+            } else {
+                if (!at_end && rest.front() == '<' &&
+                    (proper_prefix(kToolOpen, rest) || proper_prefix(kToolClose, rest) ||
+                     proper_prefix(kFunctionClose, rest) || proper_prefix(kParamClose, rest)))
+                    break;
+                end_scan.text = true;
+                length        = std::min(rest.find('<', 1), rest.size());
+            }
+            if (end_scan.text && end_scan.close) {
+                text_reason = FallbackReason::TrailingContent;
+                return Verdict::Text;
+            }
+            pos += length;
+        }
+        if (!at_end) return Verdict::Wait;
+        return end_scan.text || end_scan.markers ? Verdict::Trailing : Verdict::Close;
+    }
+
+    bool value_closes_calls(std::size_t args, std::size_t buffered) const {
+        if (codec == Codec::BufferedNormalize)
+            return !opens_unclosed_call(std::string_view(buffered_value).substr(0, buffered));
+        return !opens_unclosed_call(std::string_view(calls.back().arguments_json)
+                                        .substr(value_offset, args - value_offset));
+    }
+
+    // `reason` is the strict failure at this candidate, reported as recovered_from.
+    bool count_rejection(FallbackReason reason = FallbackReason::MalformedStructure) {
+        note_recovery(reason);
+        if (++rejections <= kMaxRecoveryAttempts) return true;
+        return fail("tool call recovery exceeded its attempt budget");
+    }
+
+    // A nested close followed by structure stays a later candidate: hold the value from here. The
+    // structure alone decides, so the hold does not depend on how the output was chunked.
+    bool note_nested_close() {
+        bool structural    = false;
+        const auto verdict = resolve(cursor, false, structural, true);
+        if (verdict == Verdict::Wait) return false;
+        if (verdict != Verdict::Text) {
+            marks.push_back({.pos      = cursor + erased,
+                             .args     = calls.back().arguments_json.size(),
+                             .buffered = buffered_value.size(),
+                             .tail     = value_tail});
+            held = true;
+        }
+        return true;
+    }
+
+    bool close_value(Verdict verdict) {
+        if (verdict == Verdict::Trailing) note_recovery(FallbackReason::TrailingContent);
+        marks.clear();
+        mark_index = 0;
+        rejected_b = false;
+        held       = false;
+        publish();
+        consume(kParamClose.size());
+        return finish_value();
+    }
+
+    // The close at the cursor is value text; every later close is a candidate in text order.
+    bool reject_value_end() {
+        if (codec == Codec::JsonValue) return fail("malformed tool parameter header");
+        unbalanced = true;
+        nested     = 0;
+        value_bytes(kParamClose);
+        consume(kParamClose.size());
+        return true;
+    }
+
+    // Production order after the balanced end fails: the held nested closes in text order.
+    // `at_close` is false at the end of output when no balanced end exists.
+    bool resolve_marks(bool at_close) {
+        for (; mark_index < marks.size(); ++mark_index) {
+            const Mark mark    = marks[mark_index];
+            bool structural    = false;
+            const auto verdict = resolve(mark.pos - erased, false, structural);
+            if (verdict == Verdict::Wait) return false;
+            if (verdict == Verdict::Fail) return fail(kTrailingCall);
+            if ((verdict == Verdict::Close || verdict == Verdict::Trailing) &&
+                value_closes_calls(mark.args, mark.buffered)) {
+                note_recovery(FallbackReason::MalformedStructure);
+                calls.back().arguments_json.resize(mark.args);
+                buffered_value.resize(mark.buffered);
+                value_tail = mark.tail;
+                cursor     = mark.pos - erased;
+                return close_value(verdict);
+            }
+            if (!count_rejection(verdict == Verdict::Text ? text_reason
+                                                          : FallbackReason::MalformedStructure))
+                return false;
+        }
+        marks.clear();
+        mark_index = 0;
+        rejected_b = false;
+        held       = false;
+        publish();
+        return at_close && reject_value_end();
+    }
+
+    // The cursor is on the balanced close, or on any close after a rejected one.
+    bool tolerant_value_end() {
+        if (!rejected_b) {
+            bool structural    = false;
+            const auto verdict = resolve(cursor, false, structural);
+            if (verdict == Verdict::Wait) return false;
+            if (verdict == Verdict::Fail) return fail(kTrailingCall);
+            // A later candidate must not open a call that it does not close.
+            if ((verdict == Verdict::Close || verdict == Verdict::Trailing) &&
+                (!unbalanced ||
+                 value_closes_calls(calls.back().arguments_json.size(), buffered_value.size())))
+                return close_value(verdict);
+            // Production tried only closes followed by structure; only those use the budget.
+            if (!structural)
+                note_recovery(text_reason);
+            else if (!count_rejection(verdict == Verdict::Text
+                                          ? text_reason
+                                          : FallbackReason::MalformedStructure))
+                return false;
+            if (marks.empty()) return reject_value_end();
+            rejected_b = true;
+        }
+        return resolve_marks(true);
+    }
+
+    // End of output inside a value with held nested closes and no balanced end.
+    bool settle_value() {
+        if (!tolerant || state != State::Value || marks.empty() || rejected_b || failure)
+            return false;
+        rejected_b = true;
+        return resolve_marks(false);
+    }
+
+    // Interrupted output: no recovery completes a call. A call that already needed recovery stays
+    // incomplete without its held arguments; otherwise the rest is decoded strictly.
+    void settle_interrupted() {
+        tolerant = false;
+        if (failure) return;
+        if (call_reason != FallbackReason::None && !calls.empty() &&
+            calls.back().status == ToolCallStatus::InProgress) {
+            calls.back().arguments_json.resize(published);
+            pending.clear();
+            cursor = 0;
+        }
+        held = false;
+        marks.clear();
+        mark_index = 0;
+        rejected_b = false;
     }
 
     std::shared_ptr<const Contract> contract;
@@ -642,6 +1024,29 @@ public:
     std::size_t members = 0, nested = 0, value_offset = 0, prefix_bytes = 0, cursor = 0;
     bool quoted = false, escaped = false, value_seen = false, buffered_json = false,
          finished = false;
+
+    // Tolerant state. `erased` counts pending bytes dropped so far (absolute offsets); `published`
+    // is the current call's published argument prefix.
+    struct EndScan {
+        std::size_t key = std::string::npos, pos = 0;
+        bool text = false, close = false, markers = false;
+    };
+
+    struct HeadScan {
+        std::size_t key = std::string::npos, pos = 0;
+        bool past_function = false;
+    };
+
+    bool tolerant = false, at_end = false, held = false, unbalanced = false, rejected_b = false,
+         call_unclosed    = false;
+    std::size_t published = 0, erased = 0, rejections = 0, mark_index = 0;
+    std::vector<Mark> marks;
+    EndScan end_scan;
+    HeadScan head_scan;
+    // `recovery`: the response's first recovery that completed a call; `call_reason`: the current
+    // call's first recovery; `skip_reason`: a quoted marker skipped before the first call.
+    FallbackReason recovery = FallbackReason::None, call_reason = FallbackReason::None,
+                   skip_reason = FallbackReason::None, text_reason = FallbackReason::None;
     std::vector<GeneratedToolCall> calls;
     std::vector<OutputEvent> events, seed;
     ToolCallParseDiagnostics diagnostic;
@@ -649,8 +1054,9 @@ public:
 };
 
 ToolCallOutputDecoder::ToolCallOutputDecoder(std::shared_ptr<const Contract> contract,
-                                             std::size_t max_tool_name_length, bool combined)
-    : impl_(std::make_unique<Impl>(std::move(contract), max_tool_name_length)) {
+                                             std::size_t max_tool_name_length, bool combined,
+                                             bool tolerant)
+    : impl_(std::make_unique<Impl>(std::move(contract), max_tool_name_length, tolerant)) {
     impl_->combined = combined;
 }
 
@@ -703,10 +1109,20 @@ void ToolCallOutputDecoder::initialize_continuation(std::string_view prefix) {
             prefix.front() == '<' ? ConstraintOutputBranch::Tools : ConstraintOutputBranch::Content;
         if (impl_->output_branch == ConstraintOutputBranch::Content) return;
     }
-    auto events = impl_->feed(prefix);
-    if (impl_->failure ||
-        std::any_of(impl_->calls.begin(), impl_->calls.end(),
-                    [](const auto& call) { return call.status == ToolCallStatus::Complete; }))
+    auto events          = impl_->feed(prefix);
+    const auto completed = [](const Impl& impl) {
+        return std::any_of(impl.calls.begin(), impl.calls.end(), [](const auto& call) {
+            return call.status == ToolCallStatus::Complete;
+        });
+    };
+    bool complete = completed(*impl_);
+    // Tolerant: a call end waits for lookahead; decide it as at the end of output.
+    if (impl_->tolerant && !impl_->failure && !complete) {
+        Impl probe = *impl_;
+        (void)probe.finish(FinishReason::StopToken);
+        complete = completed(probe);
+    }
+    if (impl_->failure || complete)
         throw RequestError(RequestErrorKind::InvalidToolConstraint,
                            "tool continuation must contain no completed or malformed calls");
     for (auto& event : events)
@@ -715,8 +1131,8 @@ void ToolCallOutputDecoder::initialize_continuation(std::string_view prefix) {
 }
 
 ParsedToolCallOutput parse_qwen_tool_call_output(const std::string& text, std::size_t max_name,
-                                                 const Contract& contract) {
-    ToolCallOutputDecoder decoder(std::make_shared<Contract>(contract), max_name);
+                                                 const Contract& contract, bool tolerant) {
+    ToolCallOutputDecoder decoder(std::make_shared<Contract>(contract), max_name, false, tolerant);
     ParsedToolCallOutput result;
     const auto append = [&](const auto& events) {
         for (const auto& event : events)

@@ -64,6 +64,7 @@ host = "127.0.0.1"
 port = 8080
 api_key = "" # Empty disables authentication; display and logs show only disabled/configured.
 model_id = "" # Empty uses the artifact's public name.
+tolerant_tool_calls = false # Recover free-route Qwen tool calls whose values quote tool markup.
 cors = false
 max_request_size = "384MiB"
 tool_constraints = "auto" # auto or basic; requests without tool_constraints use it.

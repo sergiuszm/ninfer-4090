@@ -274,6 +274,16 @@ OperationalRecord render_request_done(const RequestLogContext& context,
 
 std::optional<OperationalRecord> render_tool_call_fallback(const RequestLogContext& context,
                                                            const GenerationOutcome& outcome) {
+    // Fork-local (PR #14): a tolerant recovery is visible without exposing generated text.
+    const ninfer::ToolCallParseFallbackReason recovered = outcome.tool_call_parse.recovered_from;
+    if (recovered != ninfer::ToolCallParseFallbackReason::None) {
+        std::string message = "req#" + std::to_string(context.id) + " tool markup recovered | " +
+                              pretty_code(ninfer::tool_call_parse_fallback_reason_name(recovered));
+        if (const auto dropped = outcome.tool_call_parse.dropped_trailing_bytes)
+            message += " | trailing text dropped " + std::to_string(dropped) + " B";
+        return OperationalRecord{.severity = OperationalSeverity::Info,
+                                 .message  = std::move(message)};
+    }
     const ninfer::ToolCallParseFallbackReason reason = outcome.tool_call_parse.fallback_reason;
     if (!outcome.tool_call_parse.marker_seen ||
         reason == ninfer::ToolCallParseFallbackReason::None) {

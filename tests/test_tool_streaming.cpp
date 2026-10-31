@@ -3,6 +3,7 @@
 #include "serve/generation_service.h"
 #include "serve/openai_chat.h"
 #include "serve/openai_responses.h"
+#include "serve/translate.h"
 #include "serve_tool_stream_fixture.h"
 
 #include <nlohmann/json.hpp>
@@ -433,6 +434,236 @@ void protocol_terminal_states() {
                 "interrupted call entered executable response history");
     }
 }
+
+// Fork-local (PR #14): a call recovered by --tolerant-tool-calls streams and aggregates the same on
+// every protocol, and the published arguments are never retracted.
+template <class Stream>
+std::vector<std::string> deliver_all(Stream& stream, const OutputEvent& event) {
+    const auto* delta = std::get_if<OutputDelta>(&event);
+    if (!delta) return deliver(stream, event);
+    auto wire = stream.content_delta(delta->text);
+    if constexpr (std::is_same_v<decltype(wire), std::string>)
+        return wire.empty() ? std::vector<std::string>{}
+                            : std::vector<std::string>{std::move(wire)};
+    else
+        return wire;
+}
+
+void tolerant_protocols() {
+    const std::string body =
+        "Header line\nvalue one\n</parameter>\nThe call ends with </tool_call>.\nvalue two";
+    const std::string call = "<tool_call>\n<function=write>\n" + parameter("path", "notes.txt") +
+                             parameter("content", body) + "</function>\n</tool_call>";
+    const std::string text = "Writing it.\n" + call + "\nDone.";
+
+    OpenAIChatStream chat(make_openai_chat_response_identity("test"), false);
+    (void)chat.start();
+    OpenAIResponsesCreateRequest request;
+    request.prompt.model = "test";
+    OpenAIResponsesEventStream responses("resp_tolerant", 1, request, {});
+    (void)responses.start();
+    const auto anthropic_identity = make_anthropic_response_identity("req", "test");
+    AnthropicMessagesStream anthropic(anthropic_identity, 10, {{"write", true}});
+    (void)anthropic.start();
+    std::vector<std::string> c, r, a;
+    Recorded recorded;
+    fi::ToolCallOutputDecoder decoder(contract(false, false), 64, false, true);
+    const auto consume = [&](const std::vector<OutputEvent>& events) {
+        recorded.accept(events);
+        for (const auto& event : events) {
+            const auto add = [&](auto& stream, auto& wire) {
+                auto next = deliver_all(stream, event);
+                wire.insert(wire.end(), next.begin(), next.end());
+            };
+            add(chat, c);
+            add(responses, r);
+            add(anthropic, a);
+        }
+    };
+    for (std::size_t offset = 0; offset < text.size(); offset += 5)
+        consume(decoder.feed(std::string_view(text).substr(offset, 5)));
+    consume(decoder.finish());
+    require(!decoder.error(), "tolerant decoder failed a recoverable call");
+
+    GenerationOutcome outcome;
+    outcome.text            = recorded.text;
+    outcome.tool_calls      = decoder.take_tool_calls();
+    outcome.finish_reason   = FinishReason::StopToken;
+    outcome.tool_call_parse = decoder.diagnostics();
+    require(outcome.text == "Writing it." && outcome.tool_calls.size() == 1 &&
+                outcome.tool_calls[0].status == ToolCallStatus::Complete &&
+                recorded.calls == outcome.tool_calls &&
+                Json::parse(outcome.tool_calls[0].arguments_json)["content"] == body &&
+                outcome.tool_call_parse.recovered_from ==
+                    ToolCallParseFallbackReason::MalformedStructure &&
+                outcome.tool_call_parse.dropped_trailing_bytes == 5,
+            "tolerant decoder did not recover the call and drop the trailing prose");
+
+    // Chat: the content before the call, then the call; no content after it.
+    const auto chat_finish = chat.finish(outcome);
+    std::string chat_arguments, chat_content;
+    bool content_after_call = false;
+    for (const auto& wire : c) {
+        const auto delta = event_json(wire)["choices"][0]["delta"];
+        if (delta.contains("content") && delta["content"].is_string()) {
+            chat_content += delta["content"].get<std::string>();
+            content_after_call = content_after_call || !chat_arguments.empty();
+        }
+        if (delta.contains("tool_calls"))
+            chat_arguments += delta["tool_calls"][0]["function"].value("arguments", "");
+    }
+    const auto chat_aggregate = Json::parse(
+        make_chat_completion_response(make_openai_chat_response_identity("test"), outcome));
+    const auto& message = chat_aggregate["choices"][0]["message"];
+    require(chat_arguments == outcome.tool_calls[0].arguments_json && !content_after_call &&
+                chat_content == outcome.text && message["content"] == outcome.text &&
+                message["tool_calls"][0]["function"]["arguments"] == chat_arguments &&
+                event_json(chat_finish[0])["choices"][0]["finish_reason"] == "tool_calls",
+            "Chat stream and aggregate disagree on the recovered call");
+
+    // Responses: every streamed item equals the terminal item; no text after the call.
+    const auto response_finish = responses.finish(outcome);
+    r.insert(r.end(), response_finish.events_before_terminal.begin(),
+             response_finish.events_before_terminal.end());
+    const Json output = response_finish.response.body["output"];
+    std::string response_arguments;
+    std::size_t done     = 0;
+    bool call_started    = false;
+    bool text_after_call = false;
+    for (const auto& wire : r) {
+        const auto value = event_json(wire);
+        if (value["type"] == "response.function_call_arguments.delta") {
+            response_arguments += value["delta"].get<std::string>();
+            call_started = true;
+        }
+        if (value["type"] == "response.output_text.delta") text_after_call |= call_started;
+        if (value["type"] != "response.output_item.done") continue;
+        require(output.at(value["output_index"].get<std::size_t>()) == value["item"],
+                "Responses terminal output rewrote a streamed item");
+        ++done;
+    }
+    require(response_arguments == chat_arguments && !text_after_call && done == output.size() &&
+                output.size() == 2 && output[1]["type"] == "function_call" &&
+                output[1]["arguments"] == response_arguments,
+            "Responses stream disagrees on the recovered call");
+
+    // Messages: the streamed blocks are the aggregate blocks: text, then tool_use.
+    (void)anthropic.finish(outcome);
+    std::string anthropic_arguments, anthropic_content;
+    std::vector<std::string> streamed_blocks;
+    for (const auto& wire : a) {
+        const auto value = event_json(wire);
+        if (value["type"] == "content_block_start")
+            streamed_blocks.push_back(value["content_block"]["type"].get<std::string>());
+        if (value["type"] != "content_block_delta") continue;
+        if (value["delta"]["type"] == "input_json_delta")
+            anthropic_arguments += value["delta"]["partial_json"].get<std::string>();
+        else if (value["delta"]["type"] == "text_delta")
+            anthropic_content += value["delta"]["text"].get<std::string>();
+    }
+    const auto anthropic_aggregate =
+        Json::parse(make_anthropic_messages_response(anthropic_identity, outcome));
+    std::vector<std::string> aggregate_blocks;
+    bool tool_use = false;
+    for (const auto& block : anthropic_aggregate["content"]) {
+        aggregate_blocks.push_back(block["type"].get<std::string>());
+        if (block["type"] == "tool_use") tool_use = block["input"]["content"] == body;
+    }
+    require(anthropic_arguments == chat_arguments && anthropic_content == outcome.text &&
+                tool_use && streamed_blocks == aggregate_blocks &&
+                aggregate_blocks == std::vector<std::string>{"text", "tool_use"} &&
+                anthropic_aggregate["stop_reason"] == "tool_use",
+            "Messages stream and aggregate disagree on the recovered call");
+
+    // Flag off: the same output is invalid_tool_output (the change is 500 -> completed call).
+    fi::ToolCallOutputDecoder strict(contract(false, false), 64);
+    (void)strict.feed(text);
+    (void)strict.finish();
+    bool strict_invalid = false;
+    try {
+        if (const auto error = strict.error()) std::rethrow_exception(error->exception());
+    } catch (const RequestError& error) {
+        strict_invalid = error.kind() == RequestErrorKind::InvalidToolOutput;
+    }
+    require(strict_invalid, "flag-off decoding of the quoted close changed");
+
+    // Prose and then another call: the request fails and no call completes.
+    fi::ToolCallOutputDecoder failing(contract(false, false), 64, false, true);
+    Recorded failed;
+    failed.accept(failing.feed(call + "\nNow the real one.\n" + call));
+    failed.accept(failing.finish());
+    bool invalid = false;
+    try {
+        if (const auto error = failing.error()) std::rethrow_exception(error->exception());
+    } catch (const RequestError& error) {
+        invalid = error.kind() == RequestErrorKind::InvalidToolOutput;
+    }
+    const auto calls = failing.take_tool_calls();
+    require(invalid && calls.size() == 1 && calls[0].status == ToolCallStatus::Incomplete &&
+                failed.calls == calls,
+            "an example call followed by prose and another call was not a request error");
+}
+
+// Fork-local (PR #14): the serve request path, Chat and Messages, without tool_constraints and with
+// an explicit auto. The flag reaches the decoder; it acts only on the free route.
+void tolerant_request_path() {
+    product::ServeOptions server;
+    server.tolerant_tool_calls = true;
+    const std::string body =
+        "Header line\nvalue one\n</parameter>\nThe call ends with </tool_call>.\nvalue two\n";
+    const std::string text = "<tool_call>\n<function=write>\n" + parameter("path", "notes.txt") +
+                             parameter("content", body) + "</function>\n</tool_call>";
+    const auto decode = [&](const GenerationRequest& request, const char* label) {
+        const auto options = to_request_options(request, server, true);
+        require(options.output.tolerant_tool_calls, label);
+        const auto prompt   = to_prompt_input(request, collect_prompt_options(request, server), {});
+        const auto selected = fi::select_tool_call_contract(
+            fi::build_tool_call_output_contract(prompt.options.tool_jsons), options.tool_choice);
+        require(selected && selected->constrained == request.constrains_tools(), label);
+        const auto run = [&](bool tolerant) {
+            fi::ToolCallOutputDecoder decoder(selected, options.output.tool_name_max_length, false,
+                                              tolerant);
+            Recorded recorded;
+            recorded.accept(decoder.feed(text));
+            recorded.accept(decoder.finish());
+            const bool failed = decoder.error().has_value();
+            return std::pair{failed, decoder.take_tool_calls()};
+        };
+        const auto [failed, calls] = run(options.output.tolerant_tool_calls);
+        if (request.constrains_tools()) {
+            // Basic: the grammar cannot emit the quoted close; the flag changes nothing here.
+            require(std::pair{failed, calls} == run(false), label);
+            return;
+        }
+        require(!failed && calls.size() == 1 && calls[0].status == ToolCallStatus::Complete &&
+                    Json::parse(calls[0].arguments_json)["content"] == body,
+                label);
+    };
+    const nlohmann::json schema{
+        {"type", "object"},
+        {"properties", {{"path", {{"type", "string"}}}, {"content", {{"type", "string"}}}}}};
+    nlohmann::json chat{
+        {"model", "test"},
+        {"messages", {{{"role", "user"}, {"content", "write it"}}}},
+        {"tools",
+         {{{"type", "function"}, {"function", {{"name", "write"}, {"parameters", schema}}}}}}};
+    decode(parse_chat_completion_request(chat, {}).generation, "Chat without tool_constraints");
+    chat["tool_constraints"] = "auto";
+    const auto chat_auto     = parse_chat_completion_request(chat, {}).generation;
+    require(!chat_auto.constrains_tools(), "Chat auto was constrained");
+    decode(chat_auto, "Chat with tool_constraints auto");
+    nlohmann::json messages{{"model", "test"},
+                            {"max_tokens", 64},
+                            {"messages", {{{"role", "user"}, {"content", "write it"}}}},
+                            {"tools", {{{"name", "write"}, {"input_schema", schema}}}}};
+    decode(parse_anthropic_messages_request(messages, {}).generation,
+           "Messages without tool_constraints");
+    messages["tool_constraints"] = "auto";
+    const auto messages_auto     = parse_anthropic_messages_request(messages, {}).generation;
+    require(!messages_auto.constrains_tools(), "Messages auto was constrained");
+    decode(messages_auto, "Messages with tool_constraints auto");
+}
+
 } // namespace
 
 int main() {
@@ -444,6 +675,8 @@ int main() {
         interruption_and_continuation();
         protocols();
         protocol_terminal_states();
+        tolerant_protocols();
+        tolerant_request_path();
         std::cout << "ok\n";
         return 0;
     } catch (const std::exception& error) {

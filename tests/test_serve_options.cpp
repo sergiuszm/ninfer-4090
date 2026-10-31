@@ -184,6 +184,32 @@ void test_thinking_control() {
             "a multi-rank deployment accepted a custom thinking control");
 }
 
+// Fork-local (PR #14): --tolerant-tool-calls is opt-in and shown in the startup configuration.
+void test_tolerant_tool_calls() {
+    const auto shown = [](const ServeOptions& options, bool value) {
+        for (const auto& item : ninfer::product::configuration_view(options).items)
+            if (item.key == "server.tolerant_tool_calls")
+                return std::get<bool>(item.value) == value;
+        return false;
+    };
+    const auto defaults = parse({"ninfer-serve", "model.ninfer"});
+    require(!defaults.tolerant_tool_calls && shown(defaults, false),
+            "tolerant tool calls are on by default");
+    const auto enabled = parse({"ninfer-serve", "model.ninfer", "--tolerant-tool-calls"});
+    require(enabled.tolerant_tool_calls && shown(enabled, true),
+            "--tolerant-tool-calls was not applied and shown");
+    require(!parse({"ninfer-serve", "model.ninfer", "--tolerant-tool-calls",
+                    "--no-tolerant-tool-calls"})
+                 .tolerant_tool_calls,
+            "--no-tolerant-tool-calls did not override an earlier flag");
+    rejects([] { (void)parse({"ninfer-serve", "model.ninfer", "--tolerant-tool-calls=maybe"}); });
+
+    GenerationRequest request;
+    require(!to_request_options(request, defaults, true).output.tolerant_tool_calls &&
+                to_request_options(request, enabled, true).output.tolerant_tool_calls,
+            "--tolerant-tool-calls did not reach the request output options");
+}
+
 void test_provenance() {
     for (auto args : std::vector<std::vector<std::string>>{
              {"ninfer-serve", "model.ninfer", "--api-key", "private-value"},
@@ -277,6 +303,7 @@ int main() {
         test_resources_and_units();
         test_request_defaults();
         test_thinking_control();
+        test_tolerant_tool_calls();
         test_effort_tiers_reach_the_frontend();
         test_provenance();
         test_fork_kv_dtypes();
