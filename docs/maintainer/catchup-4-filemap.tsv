@@ -194,12 +194,12 @@ modified-in-place	tests/test_serve_options.cpp	tests/test_serve_options.cpp	2 K1
 fork-new	tests/test_slot_files.cpp	tests/test_slot_files.cpp	DROP R1 slots (not carried)	beaeb70a
 fork-new	tests/test_slot_spill_guard.cpp	tests/test_slot_spill_guard.cpp	DROP R3 spill guard (not carried)	03a99aa1
 gone	tests/test_tool_call_parser.cpp	deleted in 9cfd5646; candidates: tests/models/common/qwen/test_tool_call_parser.cpp (11/15); src/models/common/qwen/frontend/tool_call_parser.cpp (7/15); src/models/glm5next/frontend/tool_decoder.cpp (5/15)	6 PR14	6d88143b 724d0333 7d9d8b0a 91829c35
-fork-new	tools/bench/run_qwen38_c_levels.py	tools/bench/run_qwen38_c_levels.py	done caf73a2d; open: 4 flags removed upstream	1351c196
-fork-new	tools/bench/run_qwen38_mtp_k2_k5.py	tools/bench/run_qwen38_mtp_k2_k5.py	done caf73a2d; open: 4 flags removed upstream	e733d039
-fork-new	tools/bench/run_qwen38_mtp_sweep.py	tools/bench/run_qwen38_mtp_sweep.py	done caf73a2d; open: 4 flags removed upstream	e733d039 1351c196
-fork-new	tools/bench/run_qwen38_replayssm_cohort_sweep.py	tools/bench/run_qwen38_replayssm_cohort_sweep.py	done caf73a2d; open: 4 flags removed upstream	984e6b98
-fork-new	tools/bench/run_rk8v4_c2_smoke.py	tools/bench/run_rk8v4_c2_smoke.py	done caf73a2d; open: 4 flags removed upstream	7c2ce91e
-fork-new	tools/bench/run_rk8v4_quality.py	tools/bench/run_rk8v4_quality.py	done caf73a2d; open: 4 flags removed upstream	7c2ce91e
+fork-new	tools/bench/run_qwen38_c_levels.py	tools/bench/run_qwen38_c_levels.py	done caf73a2d, 1a44a593 (new flags)	1351c196
+fork-new	tools/bench/run_qwen38_mtp_k2_k5.py	tools/bench/run_qwen38_mtp_k2_k5.py	done caf73a2d (flags in run_qwen38_mtp_sweep.py, 1a44a593)	e733d039
+fork-new	tools/bench/run_qwen38_mtp_sweep.py	tools/bench/run_qwen38_mtp_sweep.py	done caf73a2d, 1a44a593 (new flags)	e733d039 1351c196
+fork-new	tools/bench/run_qwen38_replayssm_cohort_sweep.py	tools/bench/run_qwen38_replayssm_cohort_sweep.py	done caf73a2d, 1a44a593 (new flags)	984e6b98
+fork-new	tools/bench/run_rk8v4_c2_smoke.py	tools/bench/run_rk8v4_c2_smoke.py	done caf73a2d, 1a44a593 (new flags)	7c2ce91e
+fork-new	tools/bench/run_rk8v4_quality.py	tools/bench/run_rk8v4_quality.py	done caf73a2d, 1a44a593 (new flags)	7c2ce91e
 modified-in-place	tools/bench/run_serve_corpus.py	tools/bench/run_serve_corpus.py	done caf73a2d	1351c196
 fork-new	tools/test_kv/kv_oracle.py	tools/test_kv/kv_oracle.py  [dir GONE upstream]	done f45bf0da	5df406b0
 fork-new	tools/test_kv/test_e8_codec.cu	tools/test_kv/test_e8_codec.cu  [dir GONE upstream]	done f45bf0da	5df406b0
