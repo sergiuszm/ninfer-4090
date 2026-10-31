@@ -490,11 +490,11 @@ table in `~/.claude/orchestra/20261031-ninfer/reports/worker7-prefix-hang.md`.
 `basic` is the only mode that loses data without an error. The `auto` column applies to ordinary
 non-strict calls. Strict tools, selection or count policies and JSON output with tools stay
 constrained under `auto` and cut quoted markup as `basic` does. A streaming request gets the
-`invalid_tool_output` failure as an SSE error event after HTTP 200. The bare-form failure is the
-current state until the PR #14 re-port lands (`--tolerant-tool-calls` on the free route, branch
-`c4b-pr14`). It is not the final behavior. Under `auto`, tools with custom stops are accepted, and
-a malformed ordinary call fails with `invalid_tool_output`; the `basic` grammar would have
-prevented it.
+`invalid_tool_output` failure as an SSE error event after HTTP 200. The PR #14 re-port landed
+opt-in in `1fa19ad8`: with `--tolerant-tool-calls` (default off, free route only) the bare form
+is recovered as the exact call; without it, the bare form fails. Under `auto`, tools with custom
+stops are accepted, and a malformed ordinary call fails with `invalid_tool_output`; the `basic`
+grammar would have prevented it.
 
 Integration (2026-10-31): `catchup4b` merges stage 2 (`4b487cc1`) and stage 3 (`d60aeaf0`) on the
 serve merge `c49082f7`. Clean sm_89 build with tests, apps and benches: 1432 targets, 0 errors,
