@@ -15,17 +15,19 @@
 namespace ninfer::test {
 namespace {
 #if defined(NINFER_SM86)
-// Fork-local (rtx4090-port): a case tagged a8 or a4 launches a route that sm_89 lacks. A case
-// tagged with all three policies is a host-side workspace contract sweep and still runs.
+// Fork-local (rtx4090-port): a case tagged a8 or a4 launches a route that sm_89 lacks, except
+// on the groupwise Q4/Q5 formats, whose A8 route is the group-64 INT8 prefill. A case tagged
+// with all three policies is a host-side workspace contract sweep and still runs.
 bool sm89_unsupported_policy(const OpCase& test) {
-    bool a16 = false, a8 = false, a4 = false;
+    bool a16 = false, a8 = false, a4 = false, groupwise = false;
     for (const auto& [name, value] : test.tags) {
+        if (name == "format") groupwise = value == "q4" || value == "q5" || value == "q4_q5";
         if (name != "policy") continue;
         a16 = a16 || value == "a16";
         a8  = a8 || value == "a8";
         a4  = a4 || value == "a4";
     }
-    return (a8 || a4) && !(a16 && a8 && a4);
+    return (a8 || a4) && !(a16 && a8 && a4) && !groupwise;
 }
 #endif
 } // namespace
@@ -110,8 +112,9 @@ int OpSuite::main(int argc, char** argv) const {
                     });
                 if (!matches) continue;
 #if defined(NINFER_SM86)
-                // Fork-local (rtx4090-port): sm_89 has no A8 (TMA) or A4 (E2M1 block-scale MMA)
-                // route; the loader binds those weights as A16, so cases that launch them skip.
+                // Fork-local (rtx4090-port): sm_89 has no FP8 A8 (TMA) or A4 (E2M1 block-scale
+                // MMA) route; the loader binds those weights as A16, so cases that launch them
+                // skip.
                 if (sm89_unsupported_policy(test)) {
                     ++unsupported;
                     continue;
