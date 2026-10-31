@@ -411,7 +411,8 @@ progress, no deadlines, `/health` 200). Upstream fixed it after our target in `7
 (`neroued/dev`, 2026-10-30). `74110486` ports only its capture-status part (`Ready`, `NeedsContext`,
 `Unavailable`; the optional capture is skipped on `Unavailable`), without the perf rework and its
 `SharedCandidateEvidence` fields; `88fac6c1` ports its `capture_without_metadata` native transaction
-test. Drop both when the catch-up target contains `76b5370bd`.
+test. Drop both when the catch-up target contains `76b5370bd`. GPU windows 7-9 confirm the port: no
+stall, and the 14 other `prefix_real` steps pass on a16 and int8 (window 9 ran the last three).
 
 `host_restore` is an upstream test issue with no fork change (`49ab6e92` tried a `max_context`
 pressure request and was reverted in `dea865d5`). GPU windows 6 and 8 give the same result with a
