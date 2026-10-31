@@ -2201,22 +2201,8 @@ int exercise_attention_integration(const char* artifact) {
     return 0;
 }
 
-int main() {
-    const char* artifact = std::getenv("NINFER_TEST_ARTIFACT");
-    if (!artifact || !*artifact) {
-        std::cout << "skip: NINFER_TEST_ARTIFACT is not set\n";
-        return 77;
-    }
-    // Fork-local (PR #15): reject an unknown prefill mode before any engine starts.
-    try {
-        (void)prefill_activations_under_test();
-    } catch (const std::invalid_argument& error) {
-        std::cerr << error.what() << '\n';
-        return 1;
-    }
-    const char* selected            = std::getenv("NINFER_PREFIX_REAL_SCENARIO");
-    const std::string_view scenario = selected ? selected : "all";
-    int result                      = 0;
+int run_scenario(const char* artifact, std::string_view scenario) {
+    int result = 0;
     if (scenario == "attention") {
         try {
             result = exercise_attention_integration(artifact);
@@ -2267,6 +2253,34 @@ int main() {
         }
     } else {
         throw std::invalid_argument("unknown prefix integration scenario");
+    }
+    return result;
+}
+
+int main() {
+    const char* artifact = std::getenv("NINFER_TEST_ARTIFACT");
+    if (!artifact || !*artifact) {
+        std::cout << "skip: NINFER_TEST_ARTIFACT is not set\n";
+        return 77;
+    }
+    // Fork-local (PR #15): reject an unknown prefill mode before any engine starts.
+    try {
+        (void)prefill_activations_under_test();
+    } catch (const std::invalid_argument& error) {
+        std::cerr << error.what() << '\n';
+        return 1;
+    }
+    const char* selected            = std::getenv("NINFER_PREFIX_REAL_SCENARIO");
+    const std::string_view scenario = selected ? selected : "all";
+    // Fork-local (catch-up #4): an escaped exception is a test failure (exit 1). Uncaught, it
+    // aborts, and as PID 1 of a container the abort ends in SIGSEGV (exit 139).
+    int result = 0;
+    try {
+        result = run_scenario(artifact, scenario);
+    } catch (const std::exception& error) {
+        std::cerr << "prefix integration scenario " << scenario << " failed: " << error.what()
+                  << '\n';
+        return 1;
     }
     if (result == 0) { std::cout << "ok\n"; }
     return result;
