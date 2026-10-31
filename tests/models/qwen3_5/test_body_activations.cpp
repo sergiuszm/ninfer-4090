@@ -1,6 +1,7 @@
 // Fork-local (PR #15): the dense-body prefill activation rule of models/qwen3_5/execution.
 
 #include "models/qwen3_5/execution/precision.h"
+#include "prefill_sizing.h"
 
 #include <iostream>
 #include <variant>
@@ -123,6 +124,32 @@ void test_effective_mode(const BodyActivations& prefill, const BodyActivations& 
            "an MoE body without groupwise uses reports an effective int8 mode");
 }
 
+// The sizing site of every lifted dense-body use reserves its INT8 staging, on 27B-shaped
+// attention, GDN and dense MLP layers. The startup planner sizes these sites with the same
+// functions (planning/startup.cpp, target_body).
+void test_sizing_sites(const BodyActivations& prefill, const BodyActivations& unchanged) {
+    const ops::ProjectionProfile attention_pair{{QType::Q4_G64_FP16, 7168, 5120},
+                                                ops::LinearProfile{QType::Q5_G64_FP16, 7168, 5120}};
+    const ops::ProjectionProfile gdn_pair{{QType::Q4_G64_FP16, 4096, 5120},
+                                          ops::LinearProfile{QType::Q5_G64_FP16, 12288, 5120}};
+    const ops::LinearProfile output{QType::Q5_G64_FP16, 5120, 6144};
+    const execution::DenseProfile mlp{{QType::Q4_G64_FP16, 34816, 5120},
+                                      {QType::Q5_G64_FP16, 5120, 17408}};
+    execution::TextProfile text;
+    text.layers = {
+        {execution::AttentionProfile{attention_pair, {6144, 1024, 6144, 1024}, output}, mlp},
+        {execution::GdnProfile{gdn_pair, {}, {10240, 6144}, output}, mlp}};
+    for (const std::int32_t last : {1, 640, 1024, 8192}) {
+        namespace sizing = test::qwen3_5_prefill;
+        sizing::LiftedSites lifted;
+        failures += sizing::check_text_sizing(text, prefill, unchanged, 1, last, lifted);
+        expect(lifted.attention_projection == 1 && lifted.gdn_projection == 1 &&
+                   lifted.attention_output == 1 && lifted.gdn_output == 1 &&
+                   lifted.dense_mlp == 2,
+               "a 27B-shaped groupwise site was not lifted");
+    }
+}
+
 } // namespace
 
 int main() {
@@ -135,6 +162,7 @@ int main() {
         test_policy(prefill, unchanged);
         test_operands(prefill, unchanged);
         test_effective_mode(prefill, unchanged);
+        test_sizing_sites(prefill, unchanged);
     }
     std::cout << (failures ? "FAIL" : "ok") << '\n';
     return failures ? 1 : 0;
