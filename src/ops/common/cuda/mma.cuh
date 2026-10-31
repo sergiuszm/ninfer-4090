@@ -101,6 +101,13 @@ __device__ __forceinline__ void mma_fp8_e4m3_scaled(float& c0, float& c1, float&
                                                     unsigned a0, unsigned a1, unsigned a2,
                                                     unsigned a3, unsigned b0, unsigned b1,
                                                     unsigned scale_a, unsigned scale_b) {
+#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ < 1200
+    // Fork-local: block-scaled FP8 MMA needs sm_120a and has no plain form for non-unit scales.
+    // Its users are the fp8 and k8v4 KV attention and the GLM5Next FP8 MLA, all refused on sm_89.
+    (void)c0, (void)c1, (void)c2, (void)c3, (void)a0, (void)a1, (void)a2, (void)a3;
+    (void)b0, (void)b1, (void)scale_a, (void)scale_b;
+    __trap();
+#else
     constexpr unsigned short kScaleBlockId  = 0;
     constexpr unsigned short kScaleThreadId = 0;
     asm volatile("mma.sync.aligned.kind::mxf8f6f4.block_scale.scale_vec::1X."
@@ -111,6 +118,7 @@ __device__ __forceinline__ void mma_fp8_e4m3_scaled(float& c0, float& c1, float&
                  : "r"(a0), "r"(a1), "r"(a2), "r"(a3), "r"(b0), "r"(b1), "r"(scale_a),
                    "h"(kScaleBlockId), "h"(kScaleThreadId), "r"(scale_b), "h"(kScaleBlockId),
                    "h"(kScaleThreadId));
+#endif
 }
 
 __device__ __forceinline__ void mma_tf32_bits(float& c0, float& c1, float& c2, float& c3,
