@@ -538,7 +538,8 @@ public:
                                                                     PreparedCheckpoint = {});
     void initialize_prefill(RequestControl&, std::uint32_t base);
     void initialize_captures(RequestControl&, std::uint32_t from, std::uint32_t through);
-    [[nodiscard]] bool
+    enum class CaptureReservationStatus { Ready, NeedsContext, Unavailable };
+    [[nodiscard]] CaptureReservationStatus
     reserve_capture_destination(std::uint32_t, std::uint32_t,
                                 std::span<const CheckpointHandle> host_victims = {});
     void prepare_capture_boundary(std::uint32_t);
