@@ -751,6 +751,8 @@ int main() {
                     .at("schema_mismatch_arguments") == 2 &&
             normalized_tool_done.at("result").at("tool_call_parse").at("fallback_reason") ==
                 "none" &&
+            normalized_tool_done.at("result").at("tool_call_parse").at("recovered_from") ==
+                "none" &&
             !render_tool_call_fallback(context, normalized_tool_outcome),
         "successful tool-call normalization diagnostics are incomplete or noisy");
 
@@ -773,6 +775,24 @@ int main() {
         fallback_warning && fallback_warning->severity == OperationalSeverity::Warning &&
             fallback_warning->message == "req#7 tool markup returned as text | undeclared tool",
         "tool-call text fallback warning is absent or exposes raw content");
+
+    // Fork-local (PR #14): a tolerant recovery is logged in the JSONL and at info level.
+    GenerationOutcome recovered_outcome = normalized_tool_outcome;
+    recovered_outcome.tool_call_parse.recovered_from =
+        ninfer::ToolCallParseFallbackReason::TrailingContent;
+    const Json recovered_done =
+        Json::parse(format_request_done_json("serve-test", 3004, context, recovered_outcome));
+    failures +=
+        check(recovered_done.at("result").at("tool_call_parse").at("recovered_from") ==
+                      "trailing_content" &&
+                  recovered_done.at("result").at("tool_call_parse").at("fallback_reason") == "none",
+              "tolerant recovery diagnostics missing from JSONL");
+    const std::optional<OperationalRecord> recovered_info =
+        render_tool_call_fallback(context, recovered_outcome);
+    failures +=
+        check(recovered_info && recovered_info->severity == OperationalSeverity::Info &&
+                  recovered_info->message == "req#7 tool markup recovered | trailing content",
+              "tolerant recovery info line is absent or exposes raw content");
 
     const Json error =
         Json::parse(format_request_error_json("serve-test", 4000, context, "generation failed"));
