@@ -16,7 +16,7 @@ struct RecordEffects {
     template <class Access>
     __device__ __forceinline__ static void
     observe_value_gate(const Access& access, const RecurrentCoordinates& coord, std::int32_t token,
-                       const RawValueLane& value, const RawGatePair& gate) {
+                       const RawValuePack& value, const RawGatePair& gate) {
         access.store_value(coord, token, value);
         access.store_gate(coord, token, gate);
     }
@@ -111,9 +111,11 @@ struct RecordAccess {
     }
 
     __device__ __forceinline__ void store_value(const RecurrentCoordinates& coord,
-                                                std::int32_t token, const RawValueLane& raw) const {
-        if (coord.lane < kDvPerWarp) {
-            store_value_element(coord, token, coord.dv_base + coord.lane, raw.bits);
+                                                std::int32_t token, const RawValuePack& raw) const {
+        if (coord.lane == 0) {
+            __nv_bfloat16* destination =
+                value_record + (column(coord, token) * heads.H_v + coord.value_head) * kStateDim;
+            common::store_vec(destination + coord.dv_base, raw.bits);
         }
     }
 

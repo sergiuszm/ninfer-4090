@@ -13,7 +13,7 @@ struct FoldEffects {
     template <class Access>
     __device__ __forceinline__ static void
     observe_value_gate(const Access&, const RecurrentCoordinates&, std::int32_t,
-                       const RawValueLane&, const RawGatePair&) {}
+                       const RawValuePack&, const RawGatePair&) {}
 
     template <bool NormalizeInputs, class Access>
     __device__ __forceinline__ static void
