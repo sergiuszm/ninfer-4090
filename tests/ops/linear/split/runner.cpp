@@ -251,6 +251,52 @@ int validate(const Profile& profile, const Weight& weight, CudaExecutionView cud
     return failures;
 }
 
+// Fork-local (PR #15): AllowA8 on the paired Q4/Q5 forms selects group-64 INT8 activations.
+bool paired_groupwise(const Profile& profile) {
+    return profile.weights.size() == 2 && profile.weights[0].type == QType::Q4_G64_FP16 &&
+           profile.weights[1].type == QType::Q5_G64_FP16;
+}
+
+// Fork-local (PR #15): INT8 activations are quantized per token, so a token's outputs must not
+// depend on its column or the call width. Tokens 4..131 of a 260-wide call are compared bitwise
+// with the same tokens re-indexed to columns 0..127 of a 128-wide call, as prefix reuse
+// re-indexes the first uncached token to column 0.
+int verify_reindex_invariance(const Profile& profile, const ops::ProjectionWeights& weights,
+                              DeviceContext& context, const Invocation& call) {
+    constexpr int kWide = 260, kNarrow = 128, kShift = 4;
+    const auto bits = input_projection::bf16_bits(
+        input_projection::make_bf16_activation(profile.k, kWide, call.input_seed));
+    const std::vector<std::uint16_t> shifted(bits.begin() + std::ptrdiff_t(kShift) * profile.k,
+                                             bits.begin() +
+                                                 std::ptrdiff_t(kShift + kNarrow) * profile.k);
+    std::vector<std::vector<std::vector<std::uint16_t>>> captured;
+    for (const auto* source : {&bits, &shifted}) {
+        const int tokens = source == &bits ? kWide : kNarrow;
+        auto input       = to_device(*source);
+        Tensor x(input.span(), DType::BF16, {profile.k, tokens});
+        Outputs output(profile, tokens, false);
+        GuardedDeviceBuffer scratch(
+            ops::linear_split_workspace_capacity_bytes(weights, profile.outputs, tokens, tokens));
+        MemoryArena workspace(scratch.span());
+        ops::linear_split(x, weights, output.views, workspace, context.execution_view());
+        context.synchronize();
+        auto& arm = captured.emplace_back();
+        for (const auto& view : output.views)
+            arm.push_back(from_device<std::uint16_t>(view.data, std::size_t(view.ne[0]) * tokens));
+    }
+    int failures = 0;
+    for (std::size_t index = 0; index < profile.outputs.size(); ++index) {
+        const auto offset = std::ptrdiff_t(kShift) * profile.outputs[index];
+        if (!std::equal(captured[1][index].begin(), captured[1][index].end(),
+                        captured[0][index].begin() + offset)) {
+            std::cerr << call.id << ": output " << index
+                      << " changed when the same tokens were re-indexed\n";
+            ++failures;
+        }
+    }
+    return failures;
+}
+
 int run(const Profile& profile, std::span<const Invocation> calls) {
     std::vector<std::unique_ptr<DevicePackedWeight>> weights;
     for (const auto& recipe : profile.weights) {
@@ -268,6 +314,10 @@ int run(const Profile& profile, std::span<const Invocation> calls) {
             continue;
         }
         const auto prepared = prepare(profile, call, weights);
+        if (call.reindex_invariance) {
+            failures += verify_reindex_invariance(profile, prepared, context, call);
+            continue;
+        }
         if (call.workspace_intervals) {
             for (auto [first, last] : {std::pair{1, 48}, std::pair{1, 128}, std::pair{1, 1024}}) {
                 const auto capacity = ops::linear_split_workspace_capacity_bytes(
@@ -287,6 +337,14 @@ int run(const Profile& profile, std::span<const Invocation> calls) {
         Outputs output(profile, call.t, call.shared_output);
         const auto capacity =
             ops::linear_split_workspace_capacity_bytes(prepared, profile.outputs, call.t, call.t);
+        // Fork-local (PR #15): the INT8 route stages exactly its capacity; an A16 fallback would
+        // allocate nothing, so the exact high-water proves which route ran.
+        const bool int8_route = !call.convenience && call.policy == ops::LinearPolicy::AllowA8 &&
+                                paired_groupwise(profile);
+        if (int8_route && capacity == 0) {
+            std::cerr << call.id << ": AllowA8 capacity has no INT8 staging\n";
+            ++failures;
+        }
         GuardedDeviceBuffer scratch(capacity);
         MemoryArena workspace(scratch.span());
         const auto launch = [&] {
@@ -327,7 +385,8 @@ int run(const Profile& profile, std::span<const Invocation> calls) {
             failures += verify_output(profile, call, weights, output, activation);
             failures += input_projection::verify_preserved(call.id, input, bits);
             failures += scratch.verify_guards(call.id);
-            if (workspace.used() != 0 || workspace.peak_used() > capacity) {
+            if (workspace.used() != 0 || workspace.peak_used() > capacity ||
+                (int8_route && workspace.peak_used() != capacity)) {
                 std::cerr << call.id << ": workspace query/scope mismatch\n";
                 ++failures;
             }
@@ -361,6 +420,7 @@ void add_profile(Suite& suite, const Profile& profile, std::vector<Invocation> c
         if (call.omit_divisors) input += "/no-divisors";
         if (call.validate_operands) input += "/invalid-operands";
         if (call.workspace_intervals) input += "/workspace-intervals";
+        if (call.reindex_invariance) input += "/reindex";
         auto test = linear_suite::make_case(
             format, n, profile.k, call.t, call.policy,
             call.graph ? linear_suite::Execution::Graph : linear_suite::Execution::Eager, input);

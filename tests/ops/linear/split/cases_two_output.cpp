@@ -34,6 +34,8 @@ void add_two_output_cases(Suite& suite) {
                              .input_seed   = 701U,
                              .changed_seed = 811U});
         calls.push_back({.t = 0, .policy = Policy::AllowA8, .workspace_intervals = true});
+        calls.push_back(
+            {.t = 260, .policy = Policy::AllowA8, .input_seed = 7U, .reindex_invariance = true});
         add_profile(suite, profile, std::move(calls));
     }
     for (int k : {2048, 2560}) {

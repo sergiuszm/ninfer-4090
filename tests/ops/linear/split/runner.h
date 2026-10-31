@@ -51,6 +51,7 @@ struct Invocation {
     bool eager_before_capture  = false;
     bool validate_operands     = false;
     bool workspace_intervals   = false;
+    bool reindex_invariance    = false;
     std::string id;
 };
 
