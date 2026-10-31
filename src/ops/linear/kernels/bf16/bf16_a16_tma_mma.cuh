@@ -166,7 +166,12 @@ __launch_bounds__(Schedule::kThreads, Schedule::kMinBlocksPerSm) void bf16_a16_t
                                              lane);
             // LDMATRIX reads use the generic proxy; the next TMA write uses the async proxy.
             // Order every lane's reads across that boundary before the elected release arrival.
+#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ < 900
+            // Fork-local: the async proxy needs sm_90; sm_89 never reaches this TMA consumer.
+            __trap();
+#else
             asm volatile("fence.proxy.async.shared::cta;" ::: "memory");
+#endif
             __syncwarp();
             if (lane == 0) common::cta_mbarrier_arrive(empty + stage);
         }

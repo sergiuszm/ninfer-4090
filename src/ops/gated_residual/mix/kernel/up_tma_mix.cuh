@@ -28,12 +28,17 @@ struct StripedTmaWeightAccess {
     template <class Schedule>
     __device__ __forceinline__ static void load(void* destination, const CUtensorMap* map,
                                                 int k_sector, int row, std::uint64_t* barrier) {
+#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ < 900
+        // Fork-local: TMA needs sm_90. sm_89 refuses Qwen4Exp, the only user, at startup.
+        __trap();
+#else
         asm volatile("cp.async.bulk.tensor.4d.shared::cta.global.tile.mbarrier::complete_tx::bytes "
                      "[%0], [%1, {%2, %3, %4, %5}], [%6];"
                      :
                      : "r"(common::smem_addr(destination)), "l"(map), "r"(0), "r"(k_sector),
                        "r"(row / kStreams), "r"(0), "r"(common::smem_addr(barrier))
                      : "memory");
+#endif
     }
 };
 
