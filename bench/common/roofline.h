@@ -23,7 +23,16 @@ struct Roofline {
     double nvfp4_f32_tflops   = std::numeric_limits<double>::quiet_NaN();
 };
 
-#if NINFER_TARGET_RTX5090
+#if defined(NINFER_SM86)
+// Fork-local (rtx4090-port): the sm_89 build uses the rtx5090 source set on an RTX 4090. Nominal
+// dense references (384-bit GDDR6X at 21 Gbps; BF16 tensor with FP32 accumulate). Measured
+// references and the FP8/FP4 rates (no A8/A4 route on sm_89) remain absent.
+inline constexpr Roofline kRoofline{
+    .target          = "rtx4090",
+    .memory_gbs      = 1008.0,
+    .bf16_f32_tflops = 165.2,
+};
+#elif NINFER_TARGET_RTX5090
 inline constexpr Roofline kRoofline{
     .target             = "rtx5090",
     .memory_gbs         = 1792.0,
