@@ -111,10 +111,6 @@ void prompt_attention_for(const Tensor& q, const Tensor& positions, float scale,
         throw std::invalid_argument("e8 causal attention: storage is not a fork KV mode");
     }
     CUDA_CHECK(cudaGetLastError());
-    kv_cache_inverse_rotate_output_kernel<Geometry::QHeads>
-        <<<tokens * Geometry::QHeads * kv::kInt8Groups, 32, 0, stream>>>(
-            static_cast<__nv_bfloat16*>(out.data), tokens, tokens, 0, nullptr);
-    CUDA_CHECK(cudaGetLastError());
 }
 
 template <typename Cache, typename Metadata>

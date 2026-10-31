@@ -9,8 +9,8 @@
 //     output is rescaled per 64-group by qs[row,g]*ks[key,g].
 //   * PV uses FP16 (V is quantized per key, so its scale cannot be factored out
 //     of a key-contracted int8 accumulation): V INT4 is unpacked, dequanted once to
-//     an FP16 tile, then FP16 PV MMA runs with FP32 accumulation. The output stays in the
-//     rotated V basis; the reducer's caller rotates it back.
+//     an FP16 tile, then FP16 PV MMA runs with FP32 accumulation. The partials stay in the
+//     rotated V basis; the split reducer rotates the merged FP32 output back.
 //   * All keys (history AND the current/diagonal tokens) are read from the
 //     quantized cache; the fused append writes the new tokens first with the standalone
 //     writer's encoder (kv::write_fork_group) and a __syncthreads orders the in-block readback.

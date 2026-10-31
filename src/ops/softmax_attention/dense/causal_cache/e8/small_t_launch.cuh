@@ -154,6 +154,8 @@ void launch_partial_for_profile(const Tensor& q, CacheInput input, const Tensor&
     }
 }
 
+// Every fork storage stores V rotated per 64-dimension group (ForkCodec), so the reduce rotates
+// the merged FP32 output back before its only BF16 rounding.
 template <typename Geometry>
 void launch_reduce(const Tensor& pos, const std::int32_t* valid_columns,
                    const SmallTInvocation& invocation, std::int32_t splits,
@@ -189,18 +191,6 @@ void launch_reduce(const Tensor& pos, const std::int32_t* valid_columns,
     } else {
         launch_offset.template operator()<true, false>();
     }
-    CUDA_CHECK(cudaGetLastError());
-}
-
-// The cache stores V rotated per 64-dimension group; rotate the BF16 output back.
-template <typename Geometry>
-void launch_inverse_rotate(const std::int32_t* valid_columns, const SmallTInvocation& invocation,
-                           Tensor& out, cudaStream_t stream) {
-    const int units =
-        invocation.batch_size * invocation.width * Geometry::QHeads * kv::kInt8Groups;
-    kv_cache_inverse_rotate_output_kernel<Geometry::QHeads><<<units, 32, 0, stream>>>(
-        static_cast<__nv_bfloat16*>(out.data), invocation.width, invocation.full_width,
-        invocation.column_begin, valid_columns);
     CUDA_CHECK(cudaGetLastError());
 }
 
@@ -255,7 +245,6 @@ void small_t_launch_for(const Tensor& q, CacheInput input, const Tensor& pos, fl
         throw std::invalid_argument("e8 causal attention small-T: unsupported T");
     }
     launch_reduce<Geometry>(pos, cache.valid_columns, invocation, splits, partial, out, stream);
-    launch_inverse_rotate<Geometry>(cache.valid_columns, invocation, out, stream);
 }
 
 #define NINFER_E8_SMALL_T_INSTANCE(PREFIX, GEOMETRY, INPUT)                                        \
