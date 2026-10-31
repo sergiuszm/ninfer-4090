@@ -499,7 +499,50 @@ grammar would have prevented it.
 Integration (2026-10-31): `catchup4b` merges stage 2 (`4b487cc1`) and stage 3 (`d60aeaf0`) on the
 serve merge `c49082f7`. Clean sm_89 build with tests, apps and benches: 1432 targets, 0 errors,
 warnings only at 7 upstream sites. 29 CPU tests pass; the prefill workspace test skips without an
-artifact. GPU window 3 (production shape) is pending.
+artifact. The GPU windows are listed under "Deploy" below.
+
+Deploy (2026-10-31 18:50:34 UTC): production on magnus (container `ninfer-qwen38`) runs
+`catchup4b` `fe4b4b72`, tag `deploy-c4b-fe4b4b724161` on the fork. The package is
+`c4b-fe4b4b724161`, packaged from a clean Release sm_89 build of that commit (no later code
+commits). Its `apps/ninfer-serve` has sha256
+`a41e2e3be7b468da3961b7ef9d5df7cc37c314f2c2d86a7c3050406e89c78b3c`. The line is in
+[rtx4090-serve-line.md](rtx4090-serve-line.md): image `ninfer-run:c4b`, the v3 artifact,
+`rk4v4-e8`, INT8 prefill, the INT8 cost preset `context_cost_presets_4090_int8.json`,
+`--tool-constraints auto`, and `--tolerant-tool-calls` off.
+
+- Switch (`deploy-c4b.sh switch`): downtime 8 s, 0 warnings in the boot log. All verify rows are
+  ok: `/v1/models` `Qwen3.8-27B` with `context_window` 262144, `/slots` 2 rows, `startup_config`
+  and `server_start` from one process, `prefill_activations` int8, `tool_constraints` auto (also
+  `server.default_tool_constraints`), KV `rk4v4-e8`, context estimate 285,274 tokens, Vision
+  `max_window_features` at least 8192, cost prefill and transfer sources external with signature
+  `58642f67...b3c9`, chat 200, a tool request 200 with `finish_reason` `tool_calls`, the gateway
+  `:9001/stable/health` 200, and 286 MiB of free GPU memory (23,798 MiB used).
+- Rollback: `bash ~/ninfer-deploy/c4b-fe4b4b724161/rollback-c4b.sh` on magnus (`--check` and
+  `--dry-run` change nothing). It stops the new container, renames it
+  `ninfer-qwen38-<label>-off-<time>`, and starts the old container again as `ninfer-qwen38`. The
+  old container stays stopped as `ninfer-qwen38-pre-c4b`, with the old binary
+  `~/ninfer-deploy/bin/ninfer-serve`, the v2 artifact, the schema 2 preset, the slot files and
+  the image `ninfer-dev:runtime`. Remove the old container after one week on the new line. Keep
+  the old binary, preset and artifact until the next deploy.
+- `--tolerant-tool-calls` is off at the first deploy (user decision). Count `invalid_tool_output`
+  on the new line for one or two days (`docker logs ninfer-qwen38 2>&1 | grep -c 'invalid tool
+  output'`), then turn the flag on with a container recreate.
+
+GPU windows on magnus (2026-10-31, production stopped during each window; evidence in the local
+run notes `ninfer-recon-notes/catchup4b/`, not in the repository):
+
+| Window | Tree | Result |
+|---|---|---|
+| 1 | `67165fd7` (stages 0, 1) | Boots on sm_89. 23 ctest failures, all classified (harness, empty fp8/nvfp4/k8v4 runs, the input conv snapshot test). `int8` KV at 262144 does not fit; 131072 is ready in 6 s |
+| 2 | `e9dcd701` (stage 2), `dbd42c92` (stage 3) | Stage 2 all pass: perplexity `rk4v4-e8` 4.363715 (production 4.363573), prefill and decode at parity. Stage 3: INT8 cold prefill +46 to +52 %, perplexity +0.0017 % |
+| 3 | `2c1ecd25` (merged) | 3a: ctest 197/197 and the production-shape serve checks pass. Of 4 failures, 3 were wrong checks; the `prefix_real` tool steps are fixed in `bb13087b` and `f0fbfdb0`. 3b: parity with production (cold prefill +1.8 / +0.3 / -2.5 % at 6K / 50K / 128K, MTP decode -1.2 %); R14 auto calibration rejected on d2d. A 3a rerun on `8b041bcf` hung in `prefix_real` |
+| 4 | merged tree, production shape | The INT8 preset (R14) loads with external sources. pi's tool bodies are accepted. The decision 2 evidence (table above) |
+| 5 | `c711faee` | The `prefix_real` hang is real: `late_instructions` and `explicit_anchor_branch` stall alone (GPU 0 %, one thread at 100 % CPU) |
+| 6 | `03255d7b` | Stack dumps locate the livelock in the optional capture; the other 14 steps pass on a16 and int8 |
+| 7 | `49e21eb2` | The capture-status port removes the stall. The decision 2 `auto` check passes |
+| 8 | `7b3ca700` | A 4-minute cache fill at the production line: no capture skips (lowest free metadata 75.5 MB). 12 `prefix_real` steps pass |
+| 9 | `495e40c5` | The last 3 `prefix_real` steps pass with the port on a16 and int8. Hang gate closed |
+| 10 | package `c4b-fe4b4b724161` | All pass, flag off and on (see the PR #14 row above). 84 gate requests per side, eval 5/6 both, same decode rate |
 
 ## Community triage 2026-10-07, round 4 (PR #14)
 
