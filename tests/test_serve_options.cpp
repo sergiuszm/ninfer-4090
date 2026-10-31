@@ -231,7 +231,7 @@ void test_tool_constraints() {
     const auto defaults = parse({"ninfer-serve", "model.ninfer"});
     require(defaults.tool_constraints == ToolConstraintMode::Automatic &&
                 shown(defaults, "auto", ConfigSourceKind::Default),
-            "server tool constraints do not default to auto in server_start");
+            "server tool constraints do not default to auto in the startup configuration");
     const auto basic = parse({"ninfer-serve", "model.ninfer", "--tool-constraints", "basic"});
     require(basic.tool_constraints == ToolConstraintMode::Basic &&
                 shown(basic, "basic", ConfigSourceKind::CommandLine),
@@ -249,19 +249,24 @@ void test_tool_constraints() {
 
     const auto chat = RequestJson::parse(
         R"({"model":"m","messages":[{"role":"user","content":"hi"}],"tools":[{"type":"function","function":{"name":"write","parameters":{"type":"object"}}}]})");
-    require(!parse_chat_completion_request(chat, request_limits(defaults))
-                 .generation.constrains_tools(),
+    const auto chat_default = parse_chat_completion_request(chat, request_limits(defaults));
+    require(chat_default.generation.tool_choice.constraints == ToolConstraintMode::Automatic &&
+                !chat_default.generation.constrains_tools(),
             "default server options constrained ordinary Chat tools");
-    require(parse_chat_completion_request(chat, request_limits(basic))
-                .generation.constrains_tools(),
+    const auto chat_basic = parse_chat_completion_request(chat, request_limits(basic));
+    require(chat_basic.generation.tool_choice.constraints == ToolConstraintMode::Basic &&
+                chat_basic.generation.constrains_tools(),
             "--tool-constraints basic did not restore upstream Chat constraints");
     const auto messages = RequestJson::parse(
         R"({"model":"m","max_tokens":16,"messages":[{"role":"user","content":"hi"}],"tools":[{"name":"write","input_schema":{"type":"object"}}]})");
-    require(!parse_anthropic_messages_request(messages, request_limits(defaults))
-                 .generation.constrains_tools(),
+    const auto messages_default =
+        parse_anthropic_messages_request(messages, request_limits(defaults));
+    require(messages_default.generation.tool_choice.constraints == ToolConstraintMode::Automatic &&
+                !messages_default.generation.constrains_tools(),
             "default server options constrained ordinary Messages tools");
-    require(parse_anthropic_messages_request(messages, request_limits(basic))
-                .generation.constrains_tools(),
+    const auto messages_basic = parse_anthropic_messages_request(messages, request_limits(basic));
+    require(messages_basic.generation.tool_choice.constraints == ToolConstraintMode::Basic &&
+                messages_basic.generation.constrains_tools(),
             "--tool-constraints basic did not restore upstream Messages constraints");
 }
 
