@@ -1,43 +1,51 @@
 # RTX 4090 production serve line on `1882c6ad`
 
 This page is the serve line for the production Qwen3.8-27B server on the RTX 4090 (24 GB) after
-catch-up #4. It replaces the line of 2026-10-06 (binary `3a27f32d`), flag by flag. Values marked
+catch-up #4. It replaces the line of 2026-10-06 (binary `3a27f32d`), flag by flag. It is deployed
+since 2026-10-31 as package `c4b-fe4b4b724161` (port ledger, catch-up #4 "Deploy"). Values marked
 **MEASURE** are estimates. Read them from the first GPU boot and update this page.
 
 ## The line
 
 ```bash
-docker create --name ninfer-qwen38 --gpus all -p 8086:8080 --restart unless-stopped \
+docker create --name ninfer-qwen38 --label ninfer.deploy=c4b-fe4b4b724161 \
+  --gpus all -p 8086:8080 --restart unless-stopped \
   -v /home/serchio/Models/neroued/Qwen3.8-27B-NInfer-v3:/models:ro \
-  -v /home/serchio/ninfer-deploy/build:/opt/ninfer:ro \
+  -v /home/serchio/ninfer-deploy/c4b-fe4b4b724161:/opt/ninfer:ro \
   -v /home/serchio/ninfer-deploy/logs:/logs \
   -v /home/serchio/ninfer-deploy/context-cost:/context-cost:ro \
-  <runtime image> \
-  /opt/ninfer/apps/ninfer-serve /models/qwen3_8_27b.ninfer --host 0.0.0.0 --port 8080 \
+  --entrypoint /opt/ninfer/apps/ninfer-serve ninfer-run:c4b \
+  /models/qwen3_8_27b.ninfer --host 0.0.0.0 --port 8080 \
   --model-id Qwen3.8-27B --max-context 262144 --context-capacity auto \
   --memory-headroom 256MiB \
   --max-concurrency 2 --max-pending-requests 16 --prefill-chunk 1024 \
   --kv-dtype rk4v4-e8 --spec mtp --draft-tokens 3 --proposal-head optimized \
   --preserve-thinking --vision --vision-memory-budget 512MiB \
-  --context-cost-presets /context-cost/context_cost_presets_4090.json \
-  --prefill-activations int8 \
+  --context-cost-presets /context-cost/context_cost_presets_4090_int8.json \
+  --prefill-activations int8 --tool-constraints auto \
   --request-log-jsonl /logs/requests.jsonl
 ```
+
+The arguments after the image are the `serve-line.args` file of the package. `deploy-c4b.sh
+switch` creates the container with `--restart no` and sets `unless-stopped` after all verify rows
+pass. The `ninfer.deploy` label names the package that the container runs.
 
 The model mount is the v3 directory (`qwen3_8_27b.ninfer`, 20.4 GB). The v2 file in
 `Qwen3.8-27B-NInfer` is refused at artifact inspection.
 
-`/home/serchio/ninfer-deploy/build` is a copy of the build directory with `apps/` and `lib/`
-side by side. `ninfer-serve` loads `libninfer_core.so`, `libninfer_ops.so`, `libninfer_cpu.so`,
+`/home/serchio/ninfer-deploy/c4b-<sha12>` is the deploy package of one build: `apps/ninfer-serve`
+and its libraries in `lib/` side by side, with `serve-line.args`, `deploy-c4b.sh`,
+`rollback-c4b.sh`, `BUILD-INFO` and `SHA256SUMS`. Each build has its own directory. The old
+binary `/home/serchio/ninfer-deploy/bin/ninfer-serve` stays unchanged for a rollback.
+`ninfer-serve` loads `libninfer_core.so`, `libninfer_ops.so`, `libninfer_cpu.so`,
 `libninfer_cpu_executor.so` and `libninfer_moe_cpu.so` from `$ORIGIN/../lib` (its RUNPATH). The
 old swap of the single `ninfer-serve` file no longer works: without `../lib` the container exits
 with "error while loading shared libraries". GPU window 1 mounted the whole build directory the
 same way.
 
 The `/slots` volume is gone. `--kv-dtype rk4v4-e8` needs the stage 2 KV modes and
-`--prefill-activations int8` needs the stage 3 port. Until both land, a boot of the stage 6 tree
-alone uses `--kv-dtype int8` and leaves out `--prefill-activations`. With `int8` KV, 262144 tokens
-do not fit (see the measurements below), so such a boot also needs a smaller `--max-context`.
+`--prefill-activations int8` needs the stage 3 port. With `int8` KV, 262144 tokens do not fit (see
+the measurements below).
 
 ## Flag by flag
 
@@ -52,13 +60,14 @@ do not fit (see the measurements below), so such a boot also needs a smaller `--
 | `--lm-head-draft` | `--proposal-head optimized` | Renamed in `4126ecf4` |
 | `--preserve-thinking`, `--vision` | unchanged | |
 | (none) | `--vision-memory-budget 512MiB` | Replaces the fork's Vision item cap of 8192 tokens (R12, `08ee5cff`). The default is 1 GiB, about the old 867 MB arena at 16384 tokens. Measured at 512 MiB: 8502 features per window, so the old limit of 8192 still fits |
-| `--context-cost-presets FILE` | unchanged flag, new file | Schema 3 now requires `h2h` in `transfer` (`2705a728`), so the file of 2026-09-07 is refused. **MEASURE**: regenerate it on the RTX 4090 (R14) |
+| `--context-cost-presets FILE` | unchanged flag, new file `context_cost_presets_4090_int8.json` | Schema 3 now requires `h2h` in `transfer` (`2705a728`), so the schema 2 file of 2026-09-07 (`context_cost_presets_4090.json`) is refused. It stays next to the new file for a rollback. R14 assembled the new file from the window 3b calibration: one prefill entry for the INT8 signature `58642f67...b3c9` and the d2h, h2d, d2d and h2h transfer rows. The bench rejects the d2d fit on model shape; the file keeps that fit on purpose. h2h is upstream's generic value. Check: `engine.context_cost` in the `server_start` record shows external prefill and transfer sources |
 | `--prefill-activations int8` | unchanged | The fork INT8 prefill, re-homed in stage 3 |
+| (none) | `--tool-constraints auto` | The fork server default (see "Defaults that the line keeps"). The line writes it out, so the line documents plan decision 2 |
 | `--request-log-jsonl /logs/requests.jsonl` | unchanged | The request log schema is 31 now (20 before) |
 | `--slot-save-path /slots`, `--auto-save-evicted` | removed | Slot persistence is dropped (plan decision 1). `GET /slots` is read-only and carries no `session_digest`, so the pi slot extension turns itself off |
 | `--max-private-continuations 2`, `--max-shared-prefixes 1` | removed | Upstream removed them before `81c8ce09`. The context cache bounds retained sessions by bytes |
 | `--auto-long-anchors 2` | removed | R4 is dropped (plan decision 4) |
-| (none) | `--tolerant-tool-calls` PROPOSED, not on the line | Fork PR #14, re-ported to the streaming decoder. Production never deployed it (port ledger, round 4). It acts only on the free route: requests with `tool_constraints` `auto`, which pi gets from the fork server default `--tool-constraints auto` (plan decision 2, branch `c4b-d2`). A file write that quotes `\n</parameter>` then completes exactly instead of failing with `invalid_tool_output`; text after the last call is dropped. The user decides at the deploy proposal |
+| (none) | `--tolerant-tool-calls` off, not on the line | Fork PR #14, re-ported to the streaming decoder (merged in `1fa19ad8`). It acts only on the free route: requests with `tool_constraints` `auto`, which pi gets from the fork server default `--tool-constraints auto` (plan decision 2). A file write that quotes `\n</parameter>` then completes exactly instead of failing with `invalid_tool_output`; text after the last call is dropped. Off at the first deploy (user decision). It goes on with a container recreate after one or two days of `invalid_tool_output` counts on the new line |
 
 ## Defaults that the line keeps
 
@@ -96,7 +105,7 @@ The production values need the same readings with `rk4v4-e8` at 262144.
 
 ## Runtime image
 
-Checked on 2026-10-31 against the `NEEDED` entries of `ninfer-serve` and its `lib/` libraries:
+The deployed image is `ninfer-run:c4b`. Checked on 2026-10-31 against the `NEEDED` entries of `ninfer-serve` and its `lib/` libraries:
 `ninfer-dev:runtime` resolves all of them except `libhwloc.so.15` and `liburing.so.2`. The FFmpeg
 libraries, `libcurl.so.4`, `libjpeg.so.8` and `libcudart.so.13` are present. The runtime image
 needs `libhwloc15` and `liburing2` in addition. Do not use the build image `ninfer-dev:c4b` as
