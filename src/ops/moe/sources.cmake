@@ -1,7 +1,6 @@
 target_sources(ninfer_ops PRIVATE
   "${CMAKE_CURRENT_LIST_DIR}/weights.cpp"
   "${CMAKE_CURRENT_LIST_DIR}/operands.cpp"
-  "${CMAKE_CURRENT_LIST_DIR}/kernels/cuda/block_scaled/launch.cu"
   "${CMAKE_CURRENT_LIST_DIR}/kernels/cuda/block_scaled/shared.cu"
   "${CMAKE_CURRENT_LIST_DIR}/kernels/cuda/groupwise_int/grouped_swiglu.cu"
   "${CMAKE_CURRENT_LIST_DIR}/kernels/cuda/groupwise_int/grouping.cu"
@@ -20,6 +19,12 @@ target_sources(ninfer_ops PRIVATE
   "${CMAKE_CURRENT_LIST_DIR}/routed_swiglu/cuda/q4_q6/shapes/h2048_i512_e256_k8/dispatch.cpp"
   "${CMAKE_CURRENT_LIST_DIR}/routed_swiglu/cuda/q8_q8/shapes/h2048_i512_e256_k8/dispatch.cpp"
 )
+
+# Fork-local (rtx4090-port): the RDC device link places the shared scratch of the grouping helpers
+# after the largest relocatable shared buffer (48 KiB), past the sm_89 static limit.
+target_sources(ninfer_ops_non_rdc PRIVATE
+  "${CMAKE_CURRENT_LIST_DIR}/kernels/cuda/block_scaled/launch.cu")
+
 include("${CMAKE_CURRENT_LIST_DIR}/routed_swiglu/cpu/sources.cmake")
 include("${CMAKE_CURRENT_LIST_DIR}/kernels/cuda/block_scaled/nvfp4/${NINFER_TARGET}/sources.cmake")
 include("${CMAKE_CURRENT_LIST_DIR}/routed_swiglu/cuda/nvfp4/${NINFER_TARGET}/sources.cmake")

@@ -187,8 +187,11 @@ __device__ __forceinline__ void block_reduce_argmax(float& value, std::int32_t& 
     if (warp == 0) { warp_reduce_argmax(value, index); }
 }
 
+// Fork-local (rtx4090-port): internal linkage lets each unit lay out this __shared__ scratch with
+// its kernels. As an external symbol it is relocatable in the RDC device link, which on sm_89
+// placed it after the largest relocatable shared buffer (48 KiB), past the static limit.
 template <int BlockSize>
-__device__ __forceinline__ float block_max_broadcast(float value) {
+static __device__ __forceinline__ float block_max_broadcast(float value) {
     static_assert(BlockSize >= kWarpSize && BlockSize <= 1024);
     static_assert((BlockSize & (BlockSize - 1)) == 0);
     constexpr int kWarps = BlockSize / kWarpSize;
