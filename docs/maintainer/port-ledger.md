@@ -356,11 +356,14 @@ Stage 2 (kernels, 2026-10-26; re-homed onto `1882c6ad` 2026-10-31):
 |---|---|---|
 | K1 fork KV modes | `86adbfbf`, `b9a9d989` | rk8v4, rk4v4, rk4v4-e8 and rk2v4-e8 are K/V profiles in `include/ninfer/kv_cache_format.h`, with new vector formats for INT4 G64, E8 lattice G64 and E8 root G64 (2 bits per feature). Fork profile and format values start at 0x80. Names, option parsing and log names follow from the profile table. `kv_storage_is_fork_mode()` and the mode flags stay in `src/core/paged_kv_storage.h` |
 | K1 append path | `702a9fa2` | `kv_cache/kernels/write/fork.cuh` and `kv_cache/kernels/fork_write.{h,cu}`, called from `append/dispatch.cu` on the storage profile. Upstream's `kernels/write.cu` is unchanged. Since `71cdd615`, MTP history appends through `kv_cache_append_prefix` with B = batch, so the fork writer has a multi-batch form (B 1..8). B=1 with T>=32 keeps the page-tile kernel |
-| K2 e8 attention family | `f8d4c906`, `1cb2fed5` | Launch, plan and instances in `dense/causal_cache/e8/`, kernel bodies in `kernels/causal/e8/`, namespace `ops::e8`. The kernels take the storage as a template argument. The fused small-T append and the standalone writer share one encoder (`kv::write_fork_group`). The three entry points of `causal_softmax_attention.cpp` route fork storages to the family. A storage that no family claims is refused before the k8v4 branch. The route depends on the call shape only (`1cb2fed5`) |
+| K2 e8 attention family | `f8d4c906`, `1cb2fed5` | Launch, plan and instances in `dense/causal_cache/e8/`, kernel bodies in `kernels/causal/e8/`, namespace `ops::e8`. The kernels take the storage as a template argument. The fused small-T append and the standalone writer share one encoder (`kv::write_fork_group`). The three entry points of `causal_softmax_attention.cpp` route fork storages to the family. A storage that no family claims is refused before the k8v4 branch. The route depends on the call shape only (`1cb2fed5`), and so does the chunk size of the chunked small-T route (`1c559acd`; `rtx4090-port` switched B=1, W=9..10 from 8+1 to 5+4 above 4096 keys, which changed the kernel instances of graph nodes and could under-size a workspace planned for that width) |
 | Rotated-V single rounding | `539e6013` | roofkid `5f377f22`, unchanged in substance |
 | K1 names | `b650d9f9`, `455d93b4` | Only the `--kv-dtype` rows of `src/product/config/schema.cpp` remain of `057737b0`. Docs wait for stage 6 |
 | rk4v4-e8 oracle | `36476d93` | roofkid's host codec in `tests/ops/fork_cache_reference.h`, the FP64 oracle in `tests/ops/softmax_attention/causal/`, ctest `ninfer_softmax_attention_rk4v4-e8_test`. rk4v4-e8 uses the int8 criterion. Upstream removed `report_quantization_quality`; `NINFER_OP_REPORT_STATS` gives the error statistics |
-| Fork append tests | `425c7e44` | New: exact bytes for all fork storages in the full and prefix KV append cases, including B>1 under graph capture and the MTP shape B=2, W=4. rk8v4 bytes prove the fork writer, not upstream's D256-rotated int8 writer. rk2v4-e8 key codes have no host restatement |
+| E8 root host codec | `cbdc8a9c` | New: exact decoder, scalar encoder and FP32 tie checks for rk2v4-e8 keys in `tests/ops/fork_cache_reference.h`. A type-A root ties the residual axis exactly when the axis lands on the root pair, so about 3% of uniform blocks can take another code on the device. Cross-checked on the CPU against the shipped header compiled as host code |
+| Fork attention oracles | `f7c58ec8`, `943f74eb` | New: the causal fixture serves every fork storage; ctest `ninfer_softmax_attention_rk8v4_test` and `ninfer_softmax_attention_rk2v4-e8_test`, int8 criterion. rk2v4-e8 key groups that may tie on the device are redrawn before the run, so cache bytes compare exactly. rk4v4 is not registered: its INT4 keys share the rk4v4-e8 decode |
+| Fork append tests | `425c7e44`, `bf101028`, `20893c5e` | New: exact bytes for all fork storages in the full and prefix KV append cases, including B>1 under graph capture and the MTP shape B=2, W=4. rk8v4 bytes prove the fork writer, not upstream's D256-rotated int8 writer. rk2v4-e8 keys compare with the host E8 root codes; a block that may tie on the device must hold an admissible code. Every B>1 prefix row has its own positions, and an empty row carries valid metadata of an unused table row in passes 1 and 2 |
+| Review B cleanups | `6cf06dae`, `62f674b4`, `ee657245` | Unused INT4 index helper dropped; `kv_cache_hadamard64` takes the butterfly side from the lane; both op benches accept every `--kv-dtype` name (`all` stays the upstream five) |
 | Refused KV formats in op tests | `1ddfadac` | The fp8, nvfp4 and k8v4 format runs of the attention and QSA sparse GQA tests report a skip on sm_89 instead of an empty selection |
 | K6 Q4 SwiGLU WN32 | DROP | Variants bench carried (`50330a24`) |
 | `ce50e995` i8 prefill retune, K3, K7 | DROP | As on `catchup4` |
@@ -369,14 +372,19 @@ Gates:
 
 - Full sm_89 build with tests, apps and benches: 1419 targets, 0 errors (clean build, 13 min 53 s
   at -j16 on CPUs 8-15 and 24-31, next to two other builds). The `ninfer_ops` device link passes.
-  The warnings are the 8 upstream sites of stage 1. The fork kernels do not spill: append 24-71
-  registers, small-T at most 168, prompt 128.
+  The warnings are the 8 upstream sites of stage 1. The fork kernels do not spill (all 1135
+  functions of the e8 and fork append objects have no stack or local memory). Append uses 32-71
+  registers. Every small-T instance sits at its launch-bound cap: 168 (6 warps x 2 blocks, 12 x 1),
+  128 (8 x 2, 16 x 1), 80 (24 x 1), 64 (32 x 1). The prompt kernel uses its `__maxnreg__` of 128.
+- Review B fixes (`6cf06dae`..`943f74eb`): incremental sm_89 build of all targets, 0 errors, 0
+  warnings.
 - Without a GPU: `ninfer_serve_options_test` passes (`--kv-dtype rk4v4-e8` and the other fork
   names parse and round-trip).
-- GPU gate: pending (coordinator). The `catchup4` stage 2 measurements were taken on `81c8ce09`.
+- GPU gate: window 2 part B passed on `e9dcd701` (coordinator); the review B fixes wait for the
+  next window. The `catchup4` stage 2 measurements were taken on `81c8ce09`.
   I64 record offsets now enter the page-base math of every fork kernel, so the perplexity, server
   and cold prefill and decode comparisons against production must be repeated.
-- rk8v4, rk4v4 and rk2v4-e8 have no attention oracle, as on `rtx4090-port`.
+- rk4v4 has no attention case; its INT4 keys share the rk4v4-e8 decode.
 
 ## Community triage 2026-10-07, round 4 (PR #14)
 
