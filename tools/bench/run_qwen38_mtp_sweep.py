@@ -17,6 +17,8 @@ OUTPUT_ROOT = ROOT / "benchmark_results/qwen3_8_round_06_mtp_k0_k2_k3"
 PORT = 8093
 MODES = (("k0", 0), ("k2", 2), ("k3", 3))
 MAX_CONTEXT = 4096
+# Per-rank KV and State bytes (for example "4GiB") or auto. Old runs used a token capacity.
+CONTEXT_CAPACITY = "auto"
 OUTPUT_TOKENS = 256
 PROMPTS = (
     "Write a Python function that merges overlapping integer intervals. Explain complexity.",
@@ -65,12 +67,14 @@ def run_mode(name: str, draft_tokens: int) -> dict:
     request_log = out / "requests.jsonl"
     command = [
         str(SERVER), str(MODEL), "--host", "127.0.0.1", "--port", str(PORT),
-        "--max-context", str(MAX_CONTEXT), "--kv-capacity", str(MAX_CONTEXT),
+        "--max-context", str(MAX_CONTEXT), "--context-capacity", CONTEXT_CAPACITY,
         "--max-concurrency", "1", "--prefill-chunk", "1024", "--kv-dtype", "int8",
-        "--greedy", "--no-prefix-reuse", "--request-log-jsonl", str(request_log),
+        "--temperature", "0", "--no-prefix-reuse", "--request-log-jsonl", str(request_log),
     ]
     if draft_tokens:
-        command.extend(["--spec", "mtp", "--draft-tokens", str(draft_tokens), "--lm-head-draft"])
+        command.extend(
+            ["--spec", "mtp", "--draft-tokens", str(draft_tokens), "--proposal-head", "optimized"]
+        )
     command.extend(EXTRA_SERVER_ARGS)
     with (out / "stdout.log").open("w") as stdout, (out / "stderr.log").open("w") as stderr:
         process = subprocess.Popen(
