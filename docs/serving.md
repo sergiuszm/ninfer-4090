@@ -1244,7 +1244,7 @@ This fork changes the serve behaviors below. The production line is in
   already published the call; a suffix of only close markers is dropped too. `recovered_from` in
   `tool_call_parse` and the info line `tool markup recovered | <reason>` report each recovery
   that completed a call. `dropped_trailing_bytes` and the info line give the size of the dropped
-  text, never the text.
+  text after trimming (close markers included), never the text.
 
   Safety rules (production review rounds 1 to 4). A `<tool_call>` followed by `<` is an attempt
   to open a call and is never skipped, so a malformed or undeclared opener stays text. A later
@@ -1272,7 +1272,8 @@ This fork changes the serve behaviors below. The production line is in
   header is final; production can backtrack across it. Calls that completed before an
   interrupted end stay complete; production returned all output as text. **Residual risk, by
   design:** an example call followed only by prose runs, because it is the same as a real call
-  followed by prose. **Recovered values are a best guess:** a value that contains a complete fake
+  followed by prose. The prose after it is dropped, so the client sees only the call; operators
+  see `dropped_trailing_bytes`. **Recovered values are a best guess:** a value that contains a complete fake
   parameter sequence can split there.
 - **Effort map.** Before it renders the artifact's own template, the Qwen frontend maps `high`
   and `max` to `xhigh` and `minimal` to `low`, as the Flash-Next template does. The Qwen3.8-27B
