@@ -21,14 +21,6 @@ using E8RootG64Layout = QuantizedRowLayout<kHeadDim / 4, kInt8Groups, 4>;
 
 } // namespace detail::kv
 
-// Packed int4 codes of one 256-wide head row: 128 code bytes per row in the record addressing of
-// layout.cuh. `record` is the byte offset of the code plane, as for the upstream layouts.
-__device__ __forceinline__ std::int64_t kv_cache_i4_code_index(std::int64_t record, int kv_head,
-                                                               int packed_d, int page_offset) {
-    return detail::kv::record_offset<detail::kv::kHeadDim / 2, 1>(record, kv_head, page_offset,
-                                                                  packed_d);
-}
-
 __device__ __forceinline__ std::int8_t kv_cache_i4_quant_code(float x, float inv_scale) {
     if (inv_scale == 0.0f) { return static_cast<std::int8_t>(0); }
     int q = __float2int_rn(x * inv_scale);
