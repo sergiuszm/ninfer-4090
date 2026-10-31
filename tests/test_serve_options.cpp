@@ -1,6 +1,8 @@
+#include "ninfer/engine.h"
 #include "product/config/options.h"
 #include "serve/translate.h"
 #include "serve/openai_chat.h"
+#include "serve/anthropic_messages.h"
 #include "product/logging/configuration.h"
 
 #include <iostream>
@@ -125,6 +127,62 @@ void test_request_defaults() {
             "server output default overflowed at the protocol boundary");
 }
 
+void test_effort_tiers_reach_the_frontend() {
+    // The serve layer passes every public tier through; the Qwen frontend maps the tiers that
+    // the 27B template lacks (tests/models/common/qwen/test_frontend.cpp).
+    const auto options  = parse({"ninfer-serve", "model.ninfer"});
+    const auto messages = RequestJson::array({{{"role", "user"}, {"content", "x"}}});
+    for (const auto& [wire, effort] :
+         std::vector<std::pair<std::string, ninfer::ReasoningEffort>>{
+             {"max", ninfer::ReasoningEffort::Max},
+             {"high", ninfer::ReasoningEffort::High},
+             {"minimal", ninfer::ReasoningEffort::Minimal}}) {
+        const auto chat = parse_chat_completion_request(
+            RequestJson{{"model", "test"}, {"messages", messages}, {"reasoning_effort", wire}}, {});
+        require(collect_prompt_options(chat.generation, options).reasoning_effort == effort,
+                "Chat reasoning_effort did not reach the frontend unchanged");
+        const auto anthropic = parse_anthropic_messages_request(
+            RequestJson{{"model", "test"},
+                        {"max_tokens", 64},
+                        {"messages", messages},
+                        {"output_config", {{"effort", wire}}}},
+            {});
+        require(collect_prompt_options(anthropic.generation, options).reasoning_effort == effort,
+                "Messages output_config.effort did not reach the frontend unchanged");
+    }
+}
+
+void test_thinking_control() {
+    require(!parse({"ninfer-serve", "model.ninfer"}).launch.engine.thinking_control,
+            "thinking control is set by default");
+    const auto custom =
+        parse({"ninfer-serve", "model.ninfer", "--thinking-control", "custom guidance"});
+    require(custom.launch.engine.thinking_control == "custom guidance",
+            "--thinking-control did not preserve its value");
+    const auto view = ninfer::product::format_configuration(
+        ninfer::product::configuration_view(custom));
+    require(view.find("custom guidance") != std::string::npos,
+            "startup display lost the thinking control");
+    const auto reset = parse({"ninfer-serve", "model.ninfer", "--thinking-control", "custom",
+                              "--thinking-control", "model"});
+    require(!reset.launch.engine.thinking_control,
+            "--thinking-control model did not select the model default");
+    rejects([] { (void)parse({"ninfer-serve", "model.ninfer", "--thinking-control", ""}); });
+    rejects([] { (void)parse({"ninfer-serve", "model.ninfer", "--thinking-control"}); });
+
+    // The rank wire does not carry a custom control: the Engine refuses it for a multi-rank
+    // deployment before it reads the artifact or starts any worker.
+    auto engine = custom.launch.engine;
+    engine.deployment.emplace();
+    engine.deployment->ranks = {{.rank = 0}, {.rank = 1}};
+    std::string message;
+    try {
+        ninfer::Engine refused(engine);
+    } catch (const std::invalid_argument& error) { message = error.what(); }
+    require(message.find("multi-rank") != std::string::npos,
+            "a multi-rank deployment accepted a custom thinking control");
+}
+
 void test_provenance() {
     for (auto args : std::vector<std::vector<std::string>>{
              {"ninfer-serve", "model.ninfer", "--api-key", "private-value"},
@@ -148,6 +206,8 @@ int main() {
     try {
         test_resources_and_units();
         test_request_defaults();
+        test_thinking_control();
+        test_effort_tiers_reach_the_frontend();
         test_provenance();
         std::cout << "ok\n";
         return 0;

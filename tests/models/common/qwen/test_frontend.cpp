@@ -1088,6 +1088,78 @@ int test_selected_template_recovery_boundary() {
     return failures;
 }
 
+int test_reasoning_effort_aliases() {
+    // The 27B template supports xhigh, medium and low only. For the artifact's own template the
+    // frontend maps the other public tiers like qwen3_8_flash_next.jinja.
+    const auto compiled = fi::CompiledChatTemplate::resolve(
+        reasoning_effort_template_source(), "chat_template.jinja", nlohmann::ordered_json::object(),
+        true);
+    const std::vector<fi::ChatMessage> history{chat_message(ninfer::ChatRole::User, "question")};
+    const auto render   = [&](ninfer::ReasoningEffort effort) {
+        return compiled.render(history, {.reasoning_effort = effort}).text;
+    };
+    const auto xhigh = render(ninfer::ReasoningEffort::XHigh);
+    const auto low   = render(ninfer::ReasoningEffort::Low);
+    int failures     = check(xhigh.find("Reasoning effort is set to xhigh") != std::string::npos &&
+                                 low.find("Reasoning effort is set to low") != std::string::npos,
+                             "Qwen3.8 template no longer renders its effort instructions");
+    failures += check(render(ninfer::ReasoningEffort::High) == xhigh &&
+                          render(ninfer::ReasoningEffort::Max) == xhigh,
+                      "high or max effort did not render as xhigh");
+    failures += check(render(ninfer::ReasoningEffort::Minimal) == low,
+                      "minimal effort did not render as low");
+    failures += check(render(ninfer::ReasoningEffort::Medium) != xhigh &&
+                          render(ninfer::ReasoningEffort::Medium) != low,
+                      "medium effort was mapped to another tier");
+    fi::ChatRenderOptions kwargs;
+    kwargs.chat_template_kwargs_json = R"({"reasoning_effort":"high"})";
+    failures += check(compiled.render(history, kwargs).text == xhigh,
+                      "template kwargs effort high did not render as xhigh");
+
+    // A --chat-template override renders the tiers as given; the 27B source rejects high.
+    const auto custom = fi::CompiledChatTemplate::resolve(reasoning_effort_template_source());
+    const auto custom_render = [&](ninfer::ReasoningEffort effort) {
+        return custom.render(history, {.reasoning_effort = effort}).text;
+    };
+    failures += check(throws_invalid_argument(
+                          [&] { (void)custom_render(ninfer::ReasoningEffort::High); }) &&
+                          custom_render(ninfer::ReasoningEffort::XHigh) == xhigh,
+                      "a custom template received a mapped effort tier");
+
+    // The same split through Frontend construction: embedded artifact template or override file.
+    struct Temporary {
+        std::filesystem::path path =
+            std::filesystem::temp_directory_path() /
+            ("ninfer-effort-template-" +
+             std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) +
+             ".jinja");
+
+        ~Temporary() {
+            std::error_code error;
+            std::filesystem::remove(path, error);
+        }
+    } file;
+    {
+        std::ofstream stream(file.path);
+        stream << reasoning_effort_template_source();
+    }
+    ninfer::models::frontend::FrontendOptions override_options;
+    override_options.vision_enabled     = false;
+    override_options.chat_template_path = file.path;
+    const auto embedded   = make_frontend(resources(reasoning_effort_template_source()), false);
+    const auto overridden = make_frontend(resources(), override_options);
+    ninfer::PromptInput input;
+    input.messages.push_back({.role = ninfer::ChatRole::User, .parts = {{.text = "question"}}});
+    input.options.reasoning_effort = ninfer::ReasoningEffort::XHigh;
+    const auto expected            = FrontendFactory::inspect(embedded.prepare(input)).token_ids;
+    input.options.reasoning_effort = ninfer::ReasoningEffort::Max;
+    failures += check(FrontendFactory::inspect(embedded.prepare(input)).token_ids == expected,
+                      "the artifact template did not map max to xhigh");
+    failures += check(throws_invalid_argument([&] { (void)overridden.prepare(input); }),
+                      "a --chat-template override received a mapped effort tier");
+    return failures;
+}
+
 int test_adjacent_tool_message_boundary() {
     fi::ChatMessage assistant = chat_message(ninfer::ChatRole::Assistant, "");
     assistant.tool_calls.push_back(
@@ -2853,6 +2925,7 @@ int main() {
     failures += test_adjacent_tool_message_boundary();
     failures += test_literal_cache_boundary();
     failures += test_selected_template_recovery_boundary();
+    failures += test_reasoning_effort_aliases();
     failures += test_official_resource_guards();
     failures += test_template_file_execution();
     failures += test_invalid_public_part_enums(frontend);

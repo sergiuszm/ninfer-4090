@@ -7,6 +7,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
 #include <chrono>
 #include <exception>
 #include <mutex>
@@ -212,6 +213,9 @@ HttpServer::HttpServer(product::ServeOptions options, std::shared_ptr<spdlog::lo
 HttpServer::RequestLifecycle::RequestLifecycle(HttpServer& owner, RequestLogContext context)
     : owner_(&owner), context_(std::move(context)) {
     owner_->record_request_start(context_);
+    // Last: a start record that throws never holds a row.
+    slot_ = owner_->slots_.start(context_.id,
+                                 static_cast<std::uint32_t>(std::max(context_.prompt_tokens, 0)));
 }
 
 bool HttpServer::RequestLifecycle::claim(State terminal) noexcept {
@@ -220,11 +224,17 @@ bool HttpServer::RequestLifecycle::claim(State terminal) noexcept {
 }
 
 void HttpServer::RequestLifecycle::done(const GenerationOutcome& outcome) {
-    if (claim(State::Done)) { owner_->record_request_done(context_, outcome); }
+    if (claim(State::Done)) {
+        slot_.complete(outcome.stats.reused_prompt_tokens);
+        owner_->record_request_done(context_, outcome);
+    }
 }
 
 void HttpServer::RequestLifecycle::failure(const RequestFailure& failure) {
-    if (claim(State::Error)) { owner_->record_request_failure(context_, failure); }
+    if (claim(State::Error)) {
+        slot_.release();
+        owner_->record_request_failure(context_, failure);
+    }
 }
 
 void HttpServer::RequestLifecycle::response_failure(const RequestFailure& failure) {
@@ -440,6 +450,11 @@ void HttpServer::register_routes() {
         res.set_content(metrics_.render(stats, service_->is_available()),
                         "text/plain; version=0.0.4; charset=utf-8");
     });
+    // Read-only llama.cpp-shaped slot view; no POST /slots actions (slot persistence is dropped).
+    server_.Get("/slots", [this](const httplib::Request&, httplib::Response& res) {
+        res.set_header("Cache-Control", "no-store");
+        res.set_content(slots_.render(), "application/json");
+    });
     server_.Get(R"(/v1/models/(.+))", [this](const httplib::Request& req, httplib::Response& res) {
         handle_model(req, res);
     });
@@ -484,9 +499,10 @@ void HttpServer::register_routes() {
 }
 
 void HttpServer::handle_models(const httplib::Request&, httplib::Response& res) const {
-    res.set_content(
-        make_models_list(public_model_id_, unix_time_now(), options_.launch.engine.max_context),
-        "application/json");
+    res.set_content(make_models_list(public_model_id_, unix_time_now(),
+                                     options_.launch.engine.max_context,
+                                     service_->engine_options().enable_vision),
+                    "application/json");
 }
 
 void HttpServer::handle_model(const httplib::Request& req, httplib::Response& res) const {
@@ -500,9 +516,10 @@ void HttpServer::handle_model(const httplib::Request& req, httplib::Response& re
         write_openai_error(res, error);
         return;
     }
-    res.set_content(
-        make_model_object(public_model_id_, unix_time_now(), options_.launch.engine.max_context),
-        "application/json");
+    res.set_content(make_model_object(public_model_id_, unix_time_now(),
+                                      options_.launch.engine.max_context,
+                                      service_->engine_options().enable_vision),
+                    "application/json");
 }
 
 bool HttpServer::bind() { return server_.bind_to_port(options_.host, options_.port); }
@@ -519,6 +536,9 @@ void HttpServer::attach(GenerationService& service) {
     service_         = &service;
     metrics_.configure(public_model_id_, service.engine_options(), service.description(),
                        service.startup_report(), service.snapshot());
+    const auto& engine = service.engine_options();
+    slots_.configure(engine.max_concurrency, engine.max_context,
+                     engine.speculative.backend != ninfer::SpeculativeBackend::None);
     request_jsonl_.write_server_start(
         options_, service.engine_options(), service.sampling_defaults(), public_model_id_,
         service.description(), service.startup_report(), service.snapshot());

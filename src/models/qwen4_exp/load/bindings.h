@@ -8,5 +8,6 @@
 namespace ninfer::models::qwen4_exp::loading {
 [[nodiscard]] TextWeights bind_text(Bindings&, const TextConfig&);
 [[nodiscard]] MtpWeights bind_mtp(Bindings&, const TextConfig&, const TextWeights&, ProposalHead);
-[[nodiscard]] qwen::FrontendResources bind_resources(artifact::Binder&, const Config&);
+[[nodiscard]] qwen::FrontendResources bind_resources(artifact::Binder&, const Config&,
+                                                     const LoadOptions&);
 } // namespace ninfer::models::qwen4_exp::loading

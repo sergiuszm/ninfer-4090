@@ -137,6 +137,8 @@ build_prepared_local_model(const artifact::Reader& reader, EngineOptions& option
     load.device_object_count    = weights.device_object_count;
     load.host_object_count      = weights.host_object_count + definition.host_object_count;
     load.cuda_sync_mode         = device->sync_mode();
+    load.thinking_control_tokens =
+        static_cast<std::uint32_t>(setup.definition()->resources().text.control_tokens->size());
     load.context_cost           = std::move(cost.summary);
     std::set<std::string> formats;
     for (const auto& weight : setup.definition()->weight_data())

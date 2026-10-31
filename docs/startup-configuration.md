@@ -157,6 +157,7 @@ Absent sampling fields retain the model preset selected for the request's thinki
 | `generation.thinking` | `--thinking` / `--no-thinking` | bool or `model` / `model` |
 | `generation.preserve_thinking` | `--preserve-thinking` / `--no-preserve-thinking` | bool or `model` / `model` |
 | `generation.thinking_budget` | `--thinking-budget` | Positive uint32 or `none` / `none` |
+| `generation.thinking_control` | `--thinking-control` | Nonempty text without `</think>`, or `model` / `model`; bound at model load |
 | `generation.sampling.temperature` | `--temperature` | [0,2] or `model`; zero selects greedy |
 | `generation.sampling.top_k` | `--top-k` | Integer [0,20] or `model`; zero uses the current limit of 20 |
 | `generation.sampling.top_p` | `--top-p` | [0,1] or `model` |

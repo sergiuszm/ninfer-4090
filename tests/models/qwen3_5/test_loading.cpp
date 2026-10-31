@@ -208,6 +208,23 @@ void logical_data_and_instances() {
             "incomplete selected Vision was accepted");
     rejects([&] { (void)q35::read_definition(reader, {.speculative = SpeculativeBackend::Mtp}); },
             "absent MTP was accepted");
+    // A custom thinking control is bound with the tokenizer resources, so the program control
+    // extent and the frontend read the same tokens.
+    const std::string guidance = "Stop exploring now. Summarize the strongest line of reasoning so "
+                                 "far, state any open assumption, and then answer directly.";
+    const auto custom          = q35::read_definition(reader, {.thinking_control = guidance});
+    const auto& control        = *custom->resources().text.control_tokens;
+    require(custom->resources().text.tokenizer->decode(control) ==
+                    "\n\n " + guidance + "\n</think>\n\n" &&
+                control.size() > plan->resources().text.control_tokens->size() &&
+                custom->options().thinking_control == guidance,
+            "custom thinking control was not bound with the definition resources");
+    rejects<std::invalid_argument>(
+        [&] { (void)q35::read_definition(reader, {.thinking_control = "stop </think> now"}); },
+        "thinking control with the reasoning close marker was accepted");
+    rejects<std::invalid_argument>(
+        [&] { (void)q35::read_definition(reader, {.thinking_control = ""}); },
+        "empty thinking control was accepted");
 
     const auto resolved                   = q35::resolve_load(reader, plan, Device::cuda(0));
     const auto capacity                   = resolved.materialization().device_capacity_bytes;

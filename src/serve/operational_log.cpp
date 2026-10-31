@@ -467,6 +467,9 @@ void OperationalLog::engine_capacity(const GenerationService& service) const {
 
     logger_->info("context | history {} | checkpoint interval {} tokens",
                   cache.enabled ? "on" : "off", cache.checkpoint_interval);
+    // A thinking-budget request needs this many output tokens plus one after its budget.
+    logger_->info("thinking control | {} tokens | {}", startup.load.thinking_control_tokens,
+                  engine.thinking_control ? "custom" : "model");
 
     if (service.options().launch.engine.enable_vision) {
         const ninfer::MediaCacheSummary media = service.snapshot().media;

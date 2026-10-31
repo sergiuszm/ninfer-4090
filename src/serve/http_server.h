@@ -5,6 +5,7 @@
 #include "serve/operational_log.h"
 #include "serve/openai_responses_store.h"
 #include "serve/request_log.h"
+#include "serve/slot_board.h"
 #include "product/config/options.h"
 
 #include <httplib.h>
@@ -71,6 +72,8 @@ private:
         HttpServer* owner_ = nullptr;
         RequestLogContext context_;
         std::atomic<State> state_{State::Pending};
+        // Released as failed on destruction if neither done() nor failure() settles it.
+        SlotBoard::Lease slot_;
     };
 
     [[nodiscard]] std::shared_ptr<RequestLifecycle> begin_request(RequestLogContext context);
@@ -108,6 +111,7 @@ private:
     OperationalLog operational_log_;
     JsonlRequestLog request_jsonl_;
     Metrics metrics_;
+    SlotBoard slots_;
     httplib::Server server_;
     std::atomic<std::uint64_t> request_seq_{0};
     std::mutex stats_mutex_;

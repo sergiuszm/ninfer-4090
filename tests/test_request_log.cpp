@@ -110,6 +110,7 @@ int main() {
                   .prefill_signature = "example-prefill-signature",
                   .preset_path       = "local-costs.json",
     };
+    load.thinking_control_tokens = 25;
 
     ninfer::EngineDescription description;
     description.ranks.push_back({});
@@ -199,6 +200,8 @@ int main() {
                       "request log path missing");
     failures += check(server.at("server").at("default_thinking_budget") == 512,
                       "server thinking budget missing");
+    failures += check(server.at("server").at("thinking_control_tokens") == 25,
+                      "thinking control length missing");
     failures += check(server.at("engine").at("kv_cache") == "fp8", "KV type missing");
     options.launch.engine.kv_cache = ninfer::KvCacheStorage::Nvfp4Group16;
     engine_options.kv_cache        = options.launch.engine.kv_cache;

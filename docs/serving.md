@@ -1209,3 +1209,39 @@ responses. NInfer does not execute tools. Tool framing and argument constraints 
 
 Prompt-token usage includes chat-template and expanded media tokens. Generated-token usage comes
 from accepted output token IDs, including a stop token whose decoded text may be withheld.
+
+## RTX 4090 fork notes
+
+This fork changes the serve behaviors below. The production line is in
+[maintainer/rtx4090-serve-line.md](maintainer/rtx4090-serve-line.md).
+
+- **Thinking control.** `--thinking-control TEXT` (TOML `generation.thinking_control`) replaces
+  the body of the Qwen early-close guidance that a thinking budget inserts. The server keeps the
+  `\n\n ` prefix and the `\n</think>\n\n` suffix. The text is bound with the tokenizer resources
+  when the model loads, so its length is part of the startup plan. Startup fails if the text is
+  empty, contains `</think>`, or cannot be presented by the tokenizer. The value `model` selects
+  the default guidance. GLM5Next and multi-rank deployments refuse the option. A longer body
+  raises the output margin of every budget request: if the output capacity cannot hold the
+  budget, the control tokens and one more token, the request fails with HTTP 400
+  `thinking_budget_capacity_insufficient`. The startup log line `thinking control | N tokens`
+  and `thinking_control_tokens` in the `server_start` record give the length.
+- **Effort map.** Before it renders the artifact's own template, the Qwen frontend maps `high`
+  and `max` to `xhigh` and `minimal` to `low`, as the Flash-Next template does. The Qwen3.8-27B
+  template supports only `xhigh`, `medium` and `low`, so these tiers no longer fail with
+  `invalid_prompt`. A `--chat-template` file gets the tiers as requested. GLM keeps its own
+  tiers.
+- **Read-only slots.** `GET /slots` returns one llama.cpp-shaped row per lane: `id`,
+  `is_processing`, `n_ctx`, `n_prompt_tokens`, `n_prompt_tokens_cache` and `speculative`. The
+  rows are a serve-side view, not Engine lanes. A request takes an idle row when it starts, or
+  waits for the next row that becomes idle. An idle row keeps the prompt size of the last request
+  that completed on it. There is no slot persistence, no `POST /slots` route and no
+  `session_digest` field.
+- **llama.cpp counters.** `/metrics` also carries `llamacpp:prompt_tokens_total`,
+  `llamacpp:prompt_seconds_total`, `llamacpp:tokens_predicted_total`,
+  `llamacpp:tokens_predicted_seconds_total`, `llamacpp:requests_processing` and
+  `llamacpp:requests_deferred`. The token counters are computed prefill tokens and committed
+  decode tokens, including forced thinking-control tokens. The seconds are the prefill and
+  decode execution exposure. Deferred requests are the waiting and paused requests. The counters
+  start after warmup, as the `ninfer_` counters do.
+- **Model fields.** `/v1/models` entries also carry `context_window` (the value of
+  `max_model_len`) and `modalities` with a `vision` boolean.

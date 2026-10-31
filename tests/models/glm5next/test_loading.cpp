@@ -105,6 +105,11 @@ void selection_and_planning(const std::filesystem::path& directory) {
         const auto text = glm::read_definition(reader);
         require(!text->weights().mtp && !text->weights().vision && text->expert_banks().size() == 1,
                 "text selection retained optional components");
+        bool custom_control_refused = false;
+        try {
+            (void)glm::read_definition(reader, {.thinking_control = "custom guidance"});
+        } catch (const std::invalid_argument&) { custom_control_refused = true; }
+        require(custom_control_refused, "GLM5Next accepted a custom thinking control");
         const auto mtp = glm::read_definition(reader, options(true, false));
         require(mtp->weights().mtp && !mtp->weights().vision, "MTP selection differs");
         full                 = glm::read_definition(reader, options(true, true));

@@ -178,27 +178,34 @@ void apply_openai_prompt_cache_policy(GenerationRequest& request, OpenAIPromptCa
         policy.automatic != OpenAIPromptCacheAutomatic::Disabled;
 }
 
-std::string make_models_list(const std::string& model_id, std::int64_t created,
-                             std::uint32_t max_model_len) {
+namespace {
+
+Json model_entry(const std::string& model_id, std::int64_t created, std::uint32_t max_model_len,
+                 bool vision) {
     // vLLM/llama.cpp-compatible discovery metadata for the configured per-request context limit.
-    const Json payload = {{"object", "list"},
-                          {"data", Json::array({Json{{"id", model_id},
-                                                     {"object", "model"},
-                                                     {"created", created},
-                                                     {"owned_by", "ninfer"},
-                                                     {"max_model_len", max_model_len}}})}};
+    // context_window and modalities are fork additions read by the fleet dashboard.
+    return {{"id", model_id},
+            {"object", "model"},
+            {"created", created},
+            {"owned_by", "ninfer"},
+            {"max_model_len", max_model_len},
+            {"context_window", max_model_len},
+            {"modalities", Json{{"vision", vision}}}};
+}
+
+} // namespace
+
+std::string make_models_list(const std::string& model_id, std::int64_t created,
+                             std::uint32_t max_model_len, bool vision) {
+    const Json payload = {
+        {"object", "list"},
+        {"data", Json::array({model_entry(model_id, created, max_model_len, vision)})}};
     return payload.dump();
 }
 
 std::string make_model_object(const std::string& model_id, std::int64_t created,
-                              std::uint32_t max_model_len) {
-    // vLLM/llama.cpp-compatible discovery metadata for the configured per-request context limit.
-    const Json payload = {{"id", model_id},
-                          {"object", "model"},
-                          {"created", created},
-                          {"owned_by", "ninfer"},
-                          {"max_model_len", max_model_len}};
-    return payload.dump();
+                              std::uint32_t max_model_len, bool vision) {
+    return model_entry(model_id, created, max_model_len, vision).dump();
 }
 
 std::string make_error_body(const ApiError& error) {

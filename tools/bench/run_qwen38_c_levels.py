@@ -18,7 +18,8 @@ OUTPUT_ROOT = ROOT / "benchmark_results/qwen3_8_round_12_replayssm_c8_k3_8k_shar
 CONCURRENCY_LEVELS = (8,)
 PORT = 8093
 MAX_CONTEXT = 8192
-KV_CAPACITY = 8192
+# Per-rank KV and State bytes (for example "4GiB") or auto. Old runs used a token capacity.
+CONTEXT_CAPACITY = "auto"
 OUTPUT_TOKENS = 128
 PROMPT = "Explain three practical ways to make a CUDA inference server faster, with technical detail."
 STARTUP_TIMEOUT_SECONDS = 45
@@ -74,10 +75,10 @@ def run_level(concurrency: int) -> dict:
         str(SERVER),
         str(MODEL),
         "--host", "127.0.0.1", "--port", str(PORT),
-        "--max-context", str(MAX_CONTEXT), "--kv-capacity", str(KV_CAPACITY),
+        "--max-context", str(MAX_CONTEXT), "--context-capacity", CONTEXT_CAPACITY,
         "--max-concurrency", str(concurrency), "--prefill-chunk", "1024",
         "--kv-dtype", "int8", "--spec", "mtp", "--draft-tokens", "3",
-        "--lm-head-draft", "--greedy", "--no-prefix-reuse",
+        "--proposal-head", "optimized", "--temperature", "0", "--no-prefix-reuse",
         "--request-log-jsonl", str(request_log),
     ]
     (out / "command.json").write_text(json.dumps(command, indent=2), encoding="utf-8")

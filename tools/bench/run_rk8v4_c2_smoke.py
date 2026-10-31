@@ -12,6 +12,8 @@ SERVER = ROOT / "build-sm86-replayssm" / "apps" / "Release" / "ninfer-serve.exe"
 MODEL = Path(r"G:\python\custom-kernel-3090\qwen3_8_27b.ninfer")
 OUTPUT_DIR = ROOT / "benchmark_results" / "20260815_rk8v4_quality" / "02_c2_api_smoke"
 PORT = 18086
+# Per-rank KV and State bytes (for example "4GiB") or auto. Old runs used a token capacity.
+CONTEXT_CAPACITY = "auto"
 
 
 def post(index: int) -> dict:
@@ -43,9 +45,9 @@ def main() -> None:
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     command = [
         str(SERVER), str(MODEL), "--host", "127.0.0.1", "--port", str(PORT),
-        "--max-context", "4096", "--kv-capacity", "8192", "--max-concurrency", "2",
+        "--max-context", "4096", "--context-capacity", CONTEXT_CAPACITY, "--max-concurrency", "2",
         "--max-pending-requests", "4", "--prefill-chunk", "1024", "--kv-dtype", "rk8v4",
-        "--spec", "mtp", "--draft-tokens", "3", "--lm-head-draft",
+        "--spec", "mtp", "--draft-tokens", "3", "--proposal-head", "optimized",
     ]
     with (OUTPUT_DIR / "server.stdout.log").open("w", encoding="utf-8") as stdout_file, (
         OUTPUT_DIR / "server.stderr.log"

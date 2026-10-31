@@ -121,6 +121,12 @@ void HttpServer::handle_messages(const httplib::Request& req, httplib::Response&
 
     if (!request.stream) {
         lifecycle->done(aggregate);
+        if (aggregate.finish_reason == ninfer::FinishReason::Cancelled) {
+            // The client disconnected; stop_presentation() refuses cancelled outcomes.
+            lifecycle->response_failure(
+                make_client_disconnected_failure(RequestFailurePhase::Transport));
+            return;
+        }
         try {
             set_owned_json_content(res, make_anthropic_messages_response(identity, aggregate),
                                    prepared.lifetime);

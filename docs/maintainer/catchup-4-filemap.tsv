@@ -7,7 +7,7 @@ modified-in-place	apps/cli/main.cpp	apps/cli/main.cpp	2 K1 E8 root, K1 E8, K1 rk
 gone	apps/cli/options.cpp	deleted in 4126ecf4; candidates: src/product/config/options.cpp (8/15); tests/test_request_log.cpp (7/15); apps/cli/main.cpp (6/15)	2 K1 E8 root, K1 E8, K1 rk4v4, K1 rk8v4; 4 R12	0c3d2bee 816fe3fe 5df406b0 5db12fac 7c2ce91e
 gone	apps/cli/options.h	deleted in 4126ecf4; candidates: src/product/config/options.cpp (13/15); src/product/config/configuration.cpp (11/15); tests/test_request_log.cpp (10/15)	4 R12	0c3d2bee
 modified-in-place	apps/perplexity/main.cpp	apps/perplexity/main.cpp	1 B5 u128; 3 PR15	8adf1797 b8c71f00
-modified-in-place	apps/serve/main.cpp	apps/serve/main.cpp	3 PR15; 4 R10; 6 S3; DROP R4, turn ring, R1 slots	1f7ee28f 9f63c77b 7b134d2a f84d7bb1 77bca849 beaeb70a
+modified-in-place	apps/serve/main.cpp	apps/serve/main.cpp	3 PR15; 4 R10; 6 S3 dissolved (boot lines: upstream OperationalLog, prefill line with 3 PR15); DROP R4, turn ring, R1 slots	1f7ee28f 9f63c77b 7b134d2a f84d7bb1 77bca849 beaeb70a
 modified-in-place	bench/CMakeLists.txt	bench/CMakeLists.txt	1 B2/B5 3090 base; 2 K6 bench	7888feed 09a93fd4
 modified-in-place	bench/ops/q4_linear_swiglu_bench.cu	bench/ops/q4_linear_swiglu_bench.cu	3 PR15	7a507d1f
 fork-new	bench/ops/q4_linear_swiglu_variants_bench.cu	bench/ops/q4_linear_swiglu_variants_bench.cu	2 K6	7888feed
@@ -21,7 +21,7 @@ modified-in-place	include/ninfer/ops/gdn_input_proj.h	include/ninfer/ops/gdn_inp
 modified-in-place	include/ninfer/ops/linear_add.h	include/ninfer/ops/linear_add.h	3 PR15	7a507d1f
 modified-in-place	include/ninfer/ops/linear_swiglu.h	include/ninfer/ops/linear_swiglu.h	3 PR15	7a507d1f
 modified-in-place	include/ninfer/ops/softmax_attention.h	include/ninfer/ops/softmax_attention.h	2 K2	ad51c40f(merge) 4da7dc8a(merge) 82f07c34(merge)
-modified-in-place	include/ninfer/types.h	include/ninfer/types.h	2 K1 E8 root, K1 E8, K1 rk4v4, K1 rk8v4; 3 PR15; 4 R10, R12; 6 PR14, S1; DROP R3 spill guard, R4, R9, R1e slots, R3 auto-save, turn ring, R2 digest, R1 slots	91829c35 1f7ee28f 03a99aa1 9f63c77b b98904d0 bf8c8d65 77bca849 8093c640 3a2e7f07 656b0df7 8e478945 beaeb70a 0c3d2bee 816fe3fe 5df406b0 5db12fac 7c2ce91e
+modified-in-place	include/ninfer/types.h	include/ninfer/types.h	2 K1 E8 root, K1 E8, K1 rk4v4, K1 rk8v4; 3 PR15; 4 R10, R12; 6 PR14, S1 dissolved (snapshot exposure), PR18 done df8526bc; DROP R3 spill guard, R4, R9, R1e slots, R3 auto-save, turn ring, R2 digest, R1 slots	91829c35 1f7ee28f 03a99aa1 9f63c77b b98904d0 bf8c8d65 77bca849 8093c640 3a2e7f07 656b0df7 8e478945 beaeb70a 0c3d2bee 816fe3fe 5df406b0 5db12fac 7c2ce91e
 fork-new	scripts/check-linux-scripts.sh	scripts/check-linux-scripts.sh  [dir GONE upstream]	done c451a29b	8febce7e 9b802a89
 fork-new	scripts/download-qwen36-35b-vision.bat	scripts/download-qwen36-35b-vision.bat  [dir GONE upstream]	done c451a29b	8bdf1837
 fork-new	scripts/download-qwen36-35b-vision.sh	scripts/download-qwen36-35b-vision.sh  [dir GONE upstream]	done c451a29b	9b802a89
@@ -33,14 +33,14 @@ fork-new	scripts/package-release-v050.ps1	scripts/package-release-v050.ps1  [dir
 fork-new	scripts/package-release-v050.sh	scripts/package-release-v050.sh  [dir GONE upstream]	done f9a339f1	9b802a89
 fork-new	scripts/package-release-v060.ps1	scripts/package-release-v060.ps1  [dir GONE upstream]	done f9a339f1	2ae51915 8bdf1837 984e6b98
 fork-new	scripts/package-release-v060.sh	scripts/package-release-v060.sh  [dir GONE upstream]	done f9a339f1	9b802a89
-fork-new	scripts/run-qwen36-35b-vision.bat	scripts/run-qwen36-35b-vision.bat  [dir GONE upstream]	done f9a339f1; open: 4 flags removed upstream (--kv-capacity, --lm-head-draft, --default-max-tokens)	8bdf1837
-fork-new	scripts/run-qwen36-35b-vision.sh	scripts/run-qwen36-35b-vision.sh  [dir GONE upstream]	done f9a339f1; open: 4 flags removed upstream (--kv-capacity, --lm-head-draft, --default-max-tokens)	9b802a89
-fork-new	scripts/run-qwen38-c1.bat	scripts/run-qwen38-c1.bat  [dir GONE upstream]	done f9a339f1; open: 4 flags removed upstream (--kv-capacity, --lm-head-draft, --default-max-tokens)	984e6b98
-fork-new	scripts/run-qwen38-c1.sh	scripts/run-qwen38-c1.sh  [dir GONE upstream]	done f9a339f1; open: 4 flags removed upstream (--kv-capacity, --lm-head-draft, --default-max-tokens)	9b802a89
-fork-new	scripts/run-qwen38-c8.bat	scripts/run-qwen38-c8.bat  [dir GONE upstream]	done f9a339f1; open: 4 flags removed upstream (--kv-capacity, --lm-head-draft, --default-max-tokens)	984e6b98
-fork-new	scripts/run-qwen38-c8.sh	scripts/run-qwen38-c8.sh  [dir GONE upstream]	done f9a339f1; open: 4 flags removed upstream (--kv-capacity, --lm-head-draft, --default-max-tokens)	9b802a89
-fork-new	scripts/run-qwen38-vision.bat	scripts/run-qwen38-vision.bat  [dir GONE upstream]	done f9a339f1; open: 4 flags removed upstream (--kv-capacity, --lm-head-draft, --default-max-tokens)	2ae51915
-fork-new	scripts/run-qwen38-vision.sh	scripts/run-qwen38-vision.sh  [dir GONE upstream]	done f9a339f1; open: 4 flags removed upstream (--kv-capacity, --lm-head-draft, --default-max-tokens)	9b802a89
+fork-new	scripts/run-qwen36-35b-vision.bat	scripts/run-qwen36-35b-vision.bat  [dir GONE upstream]	done f9a339f1, 85a9a565 (new serve flags, context capacity auto)	8bdf1837
+fork-new	scripts/run-qwen36-35b-vision.sh	scripts/run-qwen36-35b-vision.sh  [dir GONE upstream]	done f9a339f1, 85a9a565 (new serve flags, context capacity auto)	9b802a89
+fork-new	scripts/run-qwen38-c1.bat	scripts/run-qwen38-c1.bat  [dir GONE upstream]	done f9a339f1, 85a9a565 (new serve flags, context capacity auto)	984e6b98
+fork-new	scripts/run-qwen38-c1.sh	scripts/run-qwen38-c1.sh  [dir GONE upstream]	done f9a339f1, 85a9a565 (new serve flags, context capacity auto)	9b802a89
+fork-new	scripts/run-qwen38-c8.bat	scripts/run-qwen38-c8.bat  [dir GONE upstream]	done f9a339f1, 85a9a565 (new serve flags, context capacity auto)	984e6b98
+fork-new	scripts/run-qwen38-c8.sh	scripts/run-qwen38-c8.sh  [dir GONE upstream]	done f9a339f1, 85a9a565 (new serve flags, context capacity auto)	9b802a89
+fork-new	scripts/run-qwen38-vision.bat	scripts/run-qwen38-vision.bat  [dir GONE upstream]	done f9a339f1, 85a9a565 (new serve flags, context capacity auto)	2ae51915
+fork-new	scripts/run-qwen38-vision.sh	scripts/run-qwen38-vision.sh  [dir GONE upstream]	done f9a339f1, 85a9a565 (new serve flags, context capacity auto)	9b802a89
 modified-in-place	src/CMakeLists.txt	src/CMakeLists.txt	B2 by device guards (no exclusions): ec84a8c5, a70d2374; open: 1 B5, 3 PR15 sources, 6 S1	7a507d1f 4277f14b 1eef8d83 09a93fd4
 modified-in-place	src/artifact/binder.cpp	src/artifact/binder.cpp	1 review with the 35B bindings (has_object for the optional DFlash binds)	09a93fd4
 modified-in-place	src/artifact/binder.h	src/artifact/binder.h	1 review with the 35B bindings (has_object for the optional DFlash binds)	09a93fd4
@@ -114,26 +114,26 @@ modified-in-place	src/runtime/engine/engine_core.h	src/runtime/engine/engine_cor
 gone	src/runtime/engine/materialization_planner.h	gone before 81c8ce09; candidates: tests/test_request_log.cpp (2/15); src/serve/request_log.cpp (2/15); bench/context_cost/model_context_fixture.cpp (2/15)	DROP R9 (planner gone)	b8c71f00 b98904d0
 modified-in-place	src/runtime/engine/request_record.h	src/runtime/engine/request_record.h	DROP (slots)	bf8c8d65
 gone	src/runtime/engine/resource_manager.h	gone before 81c8ce09; candidates: tests/ops/softmax_attention/qsa/test_tail_extract.cpp (1/15)	DROP (old cache gone; slots + R3)	ba56a232 7b134d2a bf8c8d65
-fork-new	src/runtime/engine/slot_spill_guard.h	src/runtime/engine/slot_spill_guard.h	DROP R3 spill guard	03a99aa1
+fork-new	src/runtime/engine/slot_spill_guard.h	src/runtime/engine/slot_spill_guard.h	DROP R3 spill guard (not carried)	03a99aa1
 fork-new	src/runtime/portable_u128.h	src/runtime/portable_u128.h	1 B5	b8c71f00 cb2df08a
-modified-in-place	src/serve/anthropic_messages_http.cpp	src/serve/anthropic_messages_http.cpp	6 S6	a2834f43
-modified-in-place	src/serve/generation_service.cpp	src/serve/generation_service.cpp	3 PR15; 4 R12; 6 S1, S3; DROP R3 spill guard, R4, R3 auto-save, turn ring, R2 digest	1f7ee28f 25297d06 03a99aa1 9f63c77b 7b134d2a 8093c640 cba2c1f8 8e478945 0c3d2bee
-modified-in-place	src/serve/generation_service.h	src/serve/generation_service.h	6 S1, S3; DROP R4, R11, R1e slots, R2 digest, R1 slots	25297d06 9f63c77b 7b134d2a 60764d66 bf8c8d65 8e478945 beaeb70a
-modified-in-place	src/serve/http_server.cpp	src/serve/http_server.cpp	6 S1, S3, S4, S2, S1/S2; DROP R11, R1e slots, turn ring, R2 digest, R1 slots, S4 timings	25297d06 7b134d2a 60764d66 bf8c8d65 cba2c1f8 656b0df7 8e478945 beaeb70a 0f95b32e b6172f24 85f685a3 b0893e79 74abe217 4277f14b 0f308358
-modified-in-place	src/serve/http_server.h	src/serve/http_server.h	6 S1; DROP R1 slots	beaeb70a 4277f14b
+modified-in-place	src/serve/anthropic_messages_http.cpp	src/serve/anthropic_messages_http.cpp	done fc76f082 (6 S6)	a2834f43
+modified-in-place	src/serve/generation_service.cpp	src/serve/generation_service.cpp	3 PR15; 4 R12; 6 S1, S3 dissolved (S1 from the snapshot; S3 nothing left); DROP R3 spill guard, R4, R3 auto-save, turn ring, R2 digest	1f7ee28f 25297d06 03a99aa1 9f63c77b 7b134d2a 8093c640 cba2c1f8 8e478945 0c3d2bee
+modified-in-place	src/serve/generation_service.h	src/serve/generation_service.h	6 S1, S3 dissolved (S1 from the snapshot; S3 nothing left); DROP R4, R11, R1e slots, R2 digest, R1 slots	25297d06 9f63c77b 7b134d2a 60764d66 bf8c8d65 8e478945 beaeb70a
+modified-in-place	src/serve/http_server.cpp	src/serve/http_server.cpp	6 S1 done 594e61b7 (one /metrics route), S4 done 53d2ca6a, S2 done e3052121 (read-only /slots, SlotBoard), S3 nothing left; DROP R11, R1e slots, turn ring, R2 digest, R1 slots, S4 timings	25297d06 7b134d2a 60764d66 bf8c8d65 cba2c1f8 656b0df7 8e478945 beaeb70a 0f95b32e b6172f24 85f685a3 b0893e79 74abe217 4277f14b 0f308358
+modified-in-place	src/serve/http_server.h	src/serve/http_server.h	6 S1 done 594e61b7, S2 done e3052121; DROP R1 slots	beaeb70a 4277f14b
 modified-in-place	src/serve/openai_chat_request.cpp	src/serve/openai_chat_request.cpp	DROP S5 effort alias	4da7dc8a(merge) 82f07c34(merge)
 modified-in-place	src/serve/openai_chat_response.cpp	src/serve/openai_chat_response.cpp	6 S4 (id_slot/session_digest DROP with slots; timings upstream)	4da7dc8a(merge) 82f07c34(merge)
-modified-in-place	src/serve/openai_common.cpp	src/serve/openai_common.cpp	6 S4 context_window + modalities	4da7dc8a(merge) 82f07c34(merge)
-untouched-upstream	src/serve/openai_common.h	src/serve/openai_common.h	6 S4 context_window + modalities	4da7dc8a(merge) 82f07c34(merge)
+modified-in-place	src/serve/openai_common.cpp	src/serve/openai_common.cpp	done 53d2ca6a (6 S4 context_window + modalities)	4da7dc8a(merge) 82f07c34(merge)
+untouched-upstream	src/serve/openai_common.h	src/serve/openai_common.h	done 53d2ca6a (6 S4 context_window + modalities)	4da7dc8a(merge) 82f07c34(merge)
 modified-in-place	src/serve/operational_log.cpp	src/serve/operational_log.cpp	6 PR14, S3	7d9d8b0a 59419263 7b134d2a
-modified-in-place	src/serve/request_events.h	src/serve/request_events.h	6 S3	7b134d2a
+modified-in-place	src/serve/request_events.h	src/serve/request_events.h	6 S3 dissolved (host-exposed helper upstream in request_log.cpp); prompt_tokens for /slots e3052121	7b134d2a
 modified-in-place	src/serve/request_log.cpp	src/serve/request_log.cpp	1 B2/B5 3090 base; 2 K1 log name, K1 E8 root, K1 E8, K1 rk4v4, K1 rk8v4; 3 PR15; 6 PR14, S3, S1/S2; DROP R4, R9, R1 slots	91829c35 8adf1797 1f7ee28f 9f63c77b b98904d0 7b134d2a beaeb70a 2619adf7 816fe3fe 5df406b0 5db12fac 7c2ce91e 74abe217 09a93fd4
-fork-new	src/serve/serve_metrics.cpp	src/serve/serve_metrics.cpp	6 S1 (one /metrics route, llamacpp block on upstream render)	25297d06 656b0df7 b0893e79 74abe217 4277f14b
-fork-new	src/serve/serve_metrics.h	src/serve/serve_metrics.h	6 S1 (one /metrics route, llamacpp block on upstream render)	25297d06 656b0df7 b0893e79 74abe217 4277f14b
-gone	src/serve/serve_options.cpp	deleted in 4126ecf4; candidates: src/product/config/options.cpp (5/15); tests/test_request_log.cpp (5/15); src/serve/translate.cpp (5/15)	2 K1 E8 root, K1 E8, K1 rk4v4, K1 rk8v4; 3 PR15; 4 R12; 6 PR14; DROP R4, turn ring, R3 auto-save, R1 slots	91829c35 1f7ee28f 9f63c77b f84d7bb1 8093c640 cba2c1f8 beaeb70a 0c3d2bee 816fe3fe 5df406b0 5db12fac 7c2ce91e
-gone	src/serve/serve_options.h	deleted in 4126ecf4; candidates: tests/test_request_log.cpp (8/15); src/product/config/options.cpp (8/15); src/product/config/options.h (6/15)	3 PR15; 4 R12; 6 PR14; DROP R4, turn ring, R3 auto-save, R1 slots	91829c35 1f7ee28f 9f63c77b f84d7bb1 8093c640 cba2c1f8 beaeb70a 0c3d2bee
-fork-new	src/serve/slot_files.h	src/serve/slot_files.h	DROP R1 slots	beaeb70a
-modified-in-place	src/serve/translate.cpp	src/serve/translate.cpp	6 PR14, S5 tiers	91829c35 51bf3597
+fork-new	src/serve/serve_metrics.cpp	src/serve/serve_metrics.cpp	done 594e61b7 (llamacpp block in src/serve/metrics.cpp; ninfer: series DROP)	25297d06 656b0df7 b0893e79 74abe217 4277f14b
+fork-new	src/serve/serve_metrics.h	src/serve/serve_metrics.h	done 594e61b7 (llamacpp block in src/serve/metrics.cpp; ninfer: series DROP)	25297d06 656b0df7 b0893e79 74abe217 4277f14b
+gone	src/serve/serve_options.cpp	deleted in 4126ecf4; candidates: src/product/config/options.cpp (5/15); tests/test_request_log.cpp (5/15); src/serve/translate.cpp (5/15)	2 K1 E8 root, K1 E8, K1 rk4v4, K1 rk8v4; 3 PR15; 4 R12; 6 PR14, PR18 done 121c8d31 (src/product/config); DROP R4, turn ring, R3 auto-save, R1 slots	91829c35 1f7ee28f 9f63c77b f84d7bb1 8093c640 cba2c1f8 beaeb70a 0c3d2bee 816fe3fe 5df406b0 5db12fac 7c2ce91e
+gone	src/serve/serve_options.h	deleted in 4126ecf4; candidates: tests/test_request_log.cpp (8/15); src/product/config/options.cpp (8/15); src/product/config/options.h (6/15)	3 PR15; 4 R12; 6 PR14, PR18 done 121c8d31 (src/product/config); DROP R4, turn ring, R3 auto-save, R1 slots	91829c35 1f7ee28f 9f63c77b f84d7bb1 8093c640 cba2c1f8 beaeb70a 0c3d2bee
+fork-new	src/serve/slot_files.h	src/serve/slot_files.h	DROP R1 slots (not carried; read-only /slots e3052121)	beaeb70a
+modified-in-place	src/serve/translate.cpp	src/serve/translate.cpp	6 PR14; S5 tiers done baadcf7b in models/common/qwen/frontend/chat_template.cpp	91829c35 51bf3597
 gone	src/targets/qwen3_6/export/ninfer/targets/qwen3_6/frontend.h	deleted in 9cfd5646; candidates: tests/models/common/qwen/test_frontend.cpp (9/15); src/models/common/qwen/frontend/frontend.cpp (9/15); src/models/common/qwen/frontend/frontend.h (9/15)	4 R12	328d9aa8 73b42127
 gone	src/targets/qwen3_6/export/ninfer/targets/qwen3_6/runtime.h	gone before 81c8ce09; candidates: src/models/qwen3_5/runtime_types.h (4/15); src/models/glm5next/session/session.h (3/15); src/models/qwen4_exp/runtime_types.h (3/15)	DROP R1e slots, turn ring, R2 digest, R1 slots	bf8c8d65 3a2e7f07 8e478945 beaeb70a
 gone	src/targets/qwen3_6/export/ninfer/targets/qwen3_6/startup_features.h	gone before 81c8ce09; candidates: src/models/load_options.h (7/11); tests/models/qwen3_5/test_engine_prefix_real.cpp (5/11); tests/models/qwen3_5/test_engine_dflash_real.cpp (5/11)	4 R12	0c3d2bee
@@ -152,7 +152,7 @@ gone	src/targets/qwen3_6/impl/runtime/prefix_identity.h	deleted in 9cfd5646; can
 gone	src/targets/qwen3_6/impl/runtime/program.h	gone before 81c8ce09; candidates: src/models/qwen3_5/session/internal.h (2/15); src/models/qwen3_5/session/request.cpp (2/15); src/models/qwen3_5/session/sequence.cpp (1/15)	1 B5 MSVC; 2 K1 E8 root, K1 E8, K1 rk4v4, K1 rk8v4; 4 R10; DROP R6, R1e slots, turn ring, R2 digest, R1 slots	49deb207 cb2df08a 02d0976d bf8c8d65 77bca849 3a2e7f07 8e478945 beaeb70a 816fe3fe 5df406b0 5db12fac 7c2ce91e
 gone	src/targets/qwen3_6/impl/runtime/program_impl.h	gone before 81c8ce09; candidates: src/models/qwen3_5/session/internal.h (3/15); src/models/qwen3_5/session/pause.cpp (3/15); src/models/qwen3_5/session/session.cpp (2/15)	2 K1 E8 root, K1 E8, K1 rk4v4, K1 rk8v4; 4 R10; DROP R6, R8, turn ring	49deb207 81b68a20 2c046095 02d0976d e565fe50 77bca849 3a2e7f07 816fe3fe 5df406b0 5db12fac 7c2ce91e
 gone	src/targets/qwen3_6/impl/runtime/request_plan_impl.h	gone before 81c8ce09; candidates: src/models/qwen3_5/session/request.cpp (9/15); src/models/qwen3_5/session/internal.h (6/15); src/models/qwen3_5/session/source.cpp (6/15)	DROP R5	539ccdcd
-fork-new	src/targets/qwen3_6/impl/runtime/session_snapshot_impl.h	src/targets/qwen3_6/impl/runtime/session_snapshot_impl.h  [dir GONE upstream]	DROP R1 slots (incl. the 7b134d2a S3 hunk)	7b134d2a edac7921 bf8c8d65 3a2e7f07 8e478945 beaeb70a
+fork-new	src/targets/qwen3_6/impl/runtime/session_snapshot_impl.h	src/targets/qwen3_6/impl/runtime/session_snapshot_impl.h  [dir GONE upstream]	DROP R1 slots (incl. the 7b134d2a S3 hunk; not carried)	7b134d2a edac7921 bf8c8d65 3a2e7f07 8e478945 beaeb70a
 gone	src/targets/qwen3_6/impl/runtime/state_image_store.h	deleted in 9cfd5646; candidates: src/models/common/context/directory/state.cpp (9/15); src/models/common/context/directory/state.h (7/15); tests/models/common/context/test_store.cpp (5/15)	DROP R1 slots, R1e slots	edac7921 bf8c8d65
 gone	src/targets/qwen3_6_27b/impl/config.h	gone before 81c8ce09; candidates: src/models/qwen3_5/load/text.cpp (2/15); tests/models/glm5next/test_loading.cpp (2/15); src/ops/moe/kernels/cuda/groupwise_int/grouped_down.cuh (2/15)	DROP K7	ec56f922
 gone	src/targets/qwen3_6_27b/impl/package.cpp	gone before 81c8ce09; candidates: include/ninfer/types.h (7/15); src/serve/request_log.cpp (7/15); tests/test_request_log.cpp (6/15)	B2 sm check done 1e41cf70 (models/qwen3_5/program/planning/startup.cpp); open: 3 PR15, 4 R12	1f7ee28f 73b42127 785d856b
@@ -182,24 +182,24 @@ gone	tests/ops/test_gdn_input_proj_conv_record.cpp	tests/ops/linear_attention/ga
 gone	tests/ops/test_gdn_input_proj_conv_snapshot.cpp	tests/ops/linear_attention/gated_delta_net/input_conv/snapshot_cases.cpp (f2620157)	done 94156970 (policy gate)	25c782aa
 gone	tests/ops/test_gdn_replay_fold.cpp	deleted in f2620157; candidates: tests/ops/linear_attention/gated_delta_net/test_fold.cpp (15/15); tests/ops/linear_attention/gated_delta_net/input_conv/record.cpp (4/15); bench/ops/causal_conv1d_silu_bench.cu (3/15)	1 B5 (MSVC: std::sqrt not constexpr)	ad51c40f(merge) 82f07c34(merge) 2aaaaf5d(merge)
 gone	tests/ops/test_kv_cache_append.cpp	tests/ops/kv_cache/append_full.cpp, append_prefix.cpp (f30e661f)	done 94156970, 9c6e9353 (storage gate); open: 2 K1 (unrotated-K hunk only with the fork append path)	df08f261
-gone	tests/targets/qwen3_6/test_frontend.cpp	deleted in 9cfd5646; candidates: tests/models/common/qwen/test_frontend.cpp (14/15); tests/models/glm5next/output_fixture.h (5/15); src/models/common/qwen/frontend/frontend.cpp (4/15)	1 B2/B5 3090 base; 4 R12; 6 frontend test; DROP R4	328d9aa8 9f63c77b 127bd74c 09a93fd4
+gone	tests/targets/qwen3_6/test_frontend.cpp	deleted in 9cfd5646; candidates: tests/models/common/qwen/test_frontend.cpp (14/15); tests/models/glm5next/output_fixture.h (5/15); src/models/common/qwen/frontend/frontend.cpp (4/15)	1 B2/B5 3090 base; 4 R12; 6 S5 done baadcf7b (test_reasoning_effort_aliases), PR18 test done 5669322c (tests/models/qwen3_5/test_loading.cpp); DROP R4	328d9aa8 9f63c77b 127bd74c 09a93fd4
 gone	tests/targets/qwen3_6_27b/test_engine_prefix_real.cpp	gone before 81c8ce09; candidates: tests/models/qwen3_5/test_engine_prefix_real.cpp (12/15); tests/models/qwen3_5/test_engine_preemption_real.cpp (10/15); include/ninfer/types.h (10/15)	2 K2 partials; 3 PR15; DROP R6 test, R6, R3 spill guard, R4, R3, R1 test, R1e slots, R3 auto-save, turn ring test	8adf1797 1f7ee28f 7a507d1f 87230fd9 02d0976d 6f327f49 03a99aa1 9f63c77b ba56a232 481e0608 bf8c8d65 8093c640 2cbe488d
 modified-in-place	tests/test_gdn_replay_records.cpp	tests/test_gdn_replay_records.cpp	1 B5 (MSVC aligned alloc)	82f07c34(merge) 2aaaaf5d(merge)
 modified-in-place	tests/test_ninfer_bench_support.cpp	tests/test_ninfer_bench_support.cpp	2 K1 E8 root; 3 PR15	1f7ee28f 7a507d1f 816fe3fe
-modified-in-place	tests/test_openai_schema.cpp	tests/test_openai_schema.cpp	6 S5 alias test	065f9bb1
+modified-in-place	tests/test_openai_schema.cpp	tests/test_openai_schema.cpp	6 S5 alias test DROP (alias upstream); S4 test done 53d2ca6a	065f9bb1
 fork-new	tests/test_portable_u128.cpp	tests/test_portable_u128.cpp	1 B5	b8c71f00
 modified-in-place	tests/test_request_log.cpp	tests/test_request_log.cpp	1 B2/B5 3090 base; 6 PR14, S3	7d9d8b0a 59419263 7b134d2a 09a93fd4
-fork-new	tests/test_serve_metrics.cpp	tests/test_serve_metrics.cpp	6 S1 (fold into tests/test_metrics.cpp)	25297d06 656b0df7 b0893e79 74abe217 4277f14b
-modified-in-place	tests/test_serve_options.cpp	tests/test_serve_options.cpp	2 K1 E8 root, K1 rk8v4; 3 PR15; 6 PR14; DROP R4, turn ring, R3 auto-save, R1 slots	91829c35 1f7ee28f 9f63c77b f84d7bb1 8093c640 cba2c1f8 beaeb70a 816fe3fe 7c2ce91e
-fork-new	tests/test_slot_files.cpp	tests/test_slot_files.cpp	DROP R1 slots	beaeb70a
-fork-new	tests/test_slot_spill_guard.cpp	tests/test_slot_spill_guard.cpp	DROP R3 spill guard	03a99aa1
+fork-new	tests/test_serve_metrics.cpp	tests/test_serve_metrics.cpp	done 594e61b7 (folded into tests/test_metrics.cpp)	25297d06 656b0df7 b0893e79 74abe217 4277f14b
+modified-in-place	tests/test_serve_options.cpp	tests/test_serve_options.cpp	2 K1 E8 root, K1 rk8v4; 3 PR15; 6 PR14, PR18 done 121c8d31; DROP R4, turn ring, R3 auto-save, R1 slots	91829c35 1f7ee28f 9f63c77b f84d7bb1 8093c640 cba2c1f8 beaeb70a 816fe3fe 7c2ce91e
+fork-new	tests/test_slot_files.cpp	tests/test_slot_files.cpp	DROP R1 slots (not carried)	beaeb70a
+fork-new	tests/test_slot_spill_guard.cpp	tests/test_slot_spill_guard.cpp	DROP R3 spill guard (not carried)	03a99aa1
 gone	tests/test_tool_call_parser.cpp	deleted in 9cfd5646; candidates: tests/models/common/qwen/test_tool_call_parser.cpp (11/15); src/models/common/qwen/frontend/tool_call_parser.cpp (7/15); src/models/glm5next/frontend/tool_decoder.cpp (5/15)	6 PR14	6d88143b 724d0333 7d9d8b0a 91829c35
-fork-new	tools/bench/run_qwen38_c_levels.py	tools/bench/run_qwen38_c_levels.py	done caf73a2d; open: 4 flags removed upstream	1351c196
-fork-new	tools/bench/run_qwen38_mtp_k2_k5.py	tools/bench/run_qwen38_mtp_k2_k5.py	done caf73a2d; open: 4 flags removed upstream	e733d039
-fork-new	tools/bench/run_qwen38_mtp_sweep.py	tools/bench/run_qwen38_mtp_sweep.py	done caf73a2d; open: 4 flags removed upstream	e733d039 1351c196
-fork-new	tools/bench/run_qwen38_replayssm_cohort_sweep.py	tools/bench/run_qwen38_replayssm_cohort_sweep.py	done caf73a2d; open: 4 flags removed upstream	984e6b98
-fork-new	tools/bench/run_rk8v4_c2_smoke.py	tools/bench/run_rk8v4_c2_smoke.py	done caf73a2d; open: 4 flags removed upstream	7c2ce91e
-fork-new	tools/bench/run_rk8v4_quality.py	tools/bench/run_rk8v4_quality.py	done caf73a2d; open: 4 flags removed upstream	7c2ce91e
+fork-new	tools/bench/run_qwen38_c_levels.py	tools/bench/run_qwen38_c_levels.py	done caf73a2d, 1a44a593 (new flags)	1351c196
+fork-new	tools/bench/run_qwen38_mtp_k2_k5.py	tools/bench/run_qwen38_mtp_k2_k5.py	done caf73a2d (flags in run_qwen38_mtp_sweep.py, 1a44a593)	e733d039
+fork-new	tools/bench/run_qwen38_mtp_sweep.py	tools/bench/run_qwen38_mtp_sweep.py	done caf73a2d, 1a44a593 (new flags)	e733d039 1351c196
+fork-new	tools/bench/run_qwen38_replayssm_cohort_sweep.py	tools/bench/run_qwen38_replayssm_cohort_sweep.py	done caf73a2d, 1a44a593 (new flags)	984e6b98
+fork-new	tools/bench/run_rk8v4_c2_smoke.py	tools/bench/run_rk8v4_c2_smoke.py	done caf73a2d, 1a44a593 (new flags)	7c2ce91e
+fork-new	tools/bench/run_rk8v4_quality.py	tools/bench/run_rk8v4_quality.py	done caf73a2d, 1a44a593 (new flags)	7c2ce91e
 modified-in-place	tools/bench/run_serve_corpus.py	tools/bench/run_serve_corpus.py	done caf73a2d	1351c196
 fork-new	tools/test_kv/kv_oracle.py	tools/test_kv/kv_oracle.py  [dir GONE upstream]	done f45bf0da	5df406b0
 fork-new	tools/test_kv/test_e8_codec.cu	tools/test_kv/test_e8_codec.cu  [dir GONE upstream]	done f45bf0da	5df406b0

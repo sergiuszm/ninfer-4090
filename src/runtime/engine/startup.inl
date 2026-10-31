@@ -290,6 +290,8 @@ BuiltModel<typename Setup::Types> build_local_model(const artifact::Reader& read
     summary.architecture      = models::architecture_name(setup.architecture());
     summary.model_name        = setup.definition()->info().name;
     summary.prefill_signature = signature;
+    summary.thinking_control_tokens =
+        static_cast<std::uint32_t>(setup.definition()->resources().text.control_tokens->size());
     std::set<std::string> formats;
     for (const auto& weight : setup.definition()->weight_data()) {
         for (const auto& part : weight.view.parts) {

@@ -41,16 +41,19 @@ Although v2 is readable, its DFlash-bearing payload is not the artifact used to 
 
 ## Run the concurrent server
 
-Keep KV capacity explicit on a 24 GB card. Automatic sizing reserves an additional 1 GiB of
-headroom and may reject an otherwise viable compact-35B configuration.
+The server sizes the KV and State capacity automatically (`--context-capacity auto`). It takes the
+largest capacity that fits after `--memory-headroom` (default 512 MiB). The startup log shows the
+estimated token capacity. To set a fixed capacity, give `--context-capacity` a byte size. The
+headroom applies to both forms. The RTX 4090 production line is in
+[maintainer/rtx4090-serve-line.md](maintainer/rtx4090-serve-line.md).
 
 ```powershell
 .\ninfer-serve.exe models\qwen3_6_35b_a3b.ninfer `
   --host 127.0.0.1 --port 8080 `
-  --max-context 4096 --kv-capacity 4096 `
+  --max-context 4096 `
   --max-concurrency 4 --max-pending-requests 32 `
   --prefill-chunk 512 --kv-dtype int8 `
-  --spec mtp --draft-tokens 3 --lm-head-draft
+  --spec mtp --draft-tokens 3 --proposal-head optimized
 ```
 
 Prefix reuse is enabled by default; `--no-prefix-reuse` disables it. The server exposes OpenAI
@@ -68,16 +71,18 @@ to use MTP3:
 ```powershell
 .\ninfer-serve.exe models\qwen3_8_27b.ninfer `
   --host 127.0.0.1 --port 8080 `
-  --max-context 8192 --kv-capacity 8192 `
+  --max-context 8192 `
   --max-concurrency 8 --max-pending-requests 32 `
   --prefill-chunk 1024 --kv-dtype int8 `
-  --spec mtp --draft-tokens 3 --lm-head-draft
+  --spec mtp --draft-tokens 3 --proposal-head optimized
 ```
 
-This 8,192-token shared-pool configuration measured 114.73 aggregate end-to-end tok/s for eight
-simultaneous 128-token generations and peaked at 21,818 MiB. Set `--kv-capacity 65536` when all
-eight requests need independent 8K capacity; that stronger reservation measured 114.88 tok/s and
-23,745 MiB peak. Avoid competing GPU processes.
+The numbers in this paragraph were measured before catch-up #4, when the KV capacity was a token
+count (`--kv-capacity`, removed since). They are not measured again with automatic capacity. An
+8,192-token shared pool measured 114.73 aggregate end-to-end tok/s for eight simultaneous
+128-token generations and peaked at 21,818 MiB. A 65,536-token pool, so that all eight requests
+had independent 8K capacity, measured 114.88 tok/s and 23,745 MiB peak. Avoid competing GPU
+processes.
 
 The cohort size is fixed at startup, but its active membership is not: every decode round compacts
 all ready requests into one batch, while completed slots disappear. Follow-up requests wait in the
@@ -88,7 +93,9 @@ Graph shapes are reserved in advance.
 Qwen3.8 supports `low`, `medium`, and `xhigh` reasoning effort. For Chat Completions add the
 top-level field `"reasoning_effort": "xhigh"`; Responses uses
 `"reasoning": {"effort": "xhigh"}`. The CLI accepts
-`--reasoning-effort low|medium|xhigh`.
+`--reasoning-effort low|medium|xhigh`. With the artifact's own template, the other tiers map to
+these: `high` and `max` to `xhigh`, `minimal` to `low`. A `--chat-template` file gets the tiers
+as requested.
 
 The paged cache supports BF16, INT8, and experimental opt-in `rk8v4` storage. INT8 remains the
 recommended default. On the development RTX 3090, `rk8v4` raised the measured C1 automatic-sizing
@@ -97,7 +104,8 @@ matched hard-output test was not quality-equivalent. Use it only after validatin
 
 ## Measured 35B capacity
 
-These results used the compact 20.84 GiB artifact on an otherwise idle RTX 3090:
+These results used the compact 20.84 GiB artifact on an otherwise idle RTX 3090. They were
+measured before catch-up #4 with an explicit token capacity and are not measured again:
 
 | Workload | Concurrency | Aggregate decode | Peak VRAM |
 |---|---:|---:|---:|

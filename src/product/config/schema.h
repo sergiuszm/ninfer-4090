@@ -37,6 +37,7 @@ enum class Field {
     Thinking,
     PreserveThinking,
     ThinkingBudget,
+    ThinkingControl,
     Temperature,
     TopK,
     TopP,

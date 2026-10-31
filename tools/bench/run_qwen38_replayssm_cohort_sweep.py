@@ -18,7 +18,8 @@ OUTPUT_ROOT = ROOT / "benchmark_results/qwen3_8_replayssm_cohort_k3_1024"
 COHORTS = (1, 2, 4, 8)
 PORT = 8093
 MAX_CONTEXT = 8192
-BASE_KV_CAPACITY = 8192
+# Per-rank KV and State bytes (for example "4GiB") or auto. Old runs used a token capacity.
+CONTEXT_CAPACITY = "auto"
 OUTPUT_TOKENS = 1024
 PROMPTS = (
     "Write a self-contained 700 to 900 word technical brief for an engineering team. Explain how to design a robust GPU inference batching service, covering architecture, backpressure, failure handling, testing, and latency-throughput tradeoffs. Do not include full source code.",
@@ -84,12 +85,12 @@ def run_cohort(cohort: int) -> dict:
     out = OUTPUT_ROOT / f"c{cohort}"
     out.mkdir(parents=True, exist_ok=False)
     request_log = out / "requests.jsonl"
-    kv_capacity = 16384 if cohort == 8 else BASE_KV_CAPACITY
     command = [
         str(SERVER), str(MODEL), "--host", "127.0.0.1", "--port", str(PORT),
-        "--max-context", str(MAX_CONTEXT), "--kv-capacity", str(kv_capacity),
+        "--max-context", str(MAX_CONTEXT), "--context-capacity", CONTEXT_CAPACITY,
         "--max-concurrency", str(cohort), "--prefill-chunk", "1024", "--kv-dtype", "int8",
-        "--spec", "mtp", "--draft-tokens", "3", "--lm-head-draft", "--greedy",
+        "--spec", "mtp", "--draft-tokens", "3", "--proposal-head", "optimized",
+        "--temperature", "0",
         "--no-prefix-reuse", "--request-log-jsonl", str(request_log),
     ]
     (out / "command.json").write_text(json.dumps(command, indent=2), encoding="utf-8")

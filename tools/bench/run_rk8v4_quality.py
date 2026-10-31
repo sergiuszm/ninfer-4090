@@ -10,6 +10,8 @@ MODEL = Path(r"G:\python\custom-kernel-3090\qwen3_8_27b.ninfer")
 OUTPUT_DIR = ROOT / "benchmark_results" / "20260815_rk8v4_quality" / "01_matched_1k"
 MAX_CONTEXT = 4096
 MAX_NEW = 1024
+# Per-rank KV and State bytes (for example "4GiB") or auto. Old runs used a token capacity.
+CONTEXT_CAPACITY = "auto"
 KV_MODES = ("int8", "rk8v4")
 
 PROMPT = r"""You are reviewing a production algorithm. Design and implement a complete C++20 solution for offline dynamic connectivity in an undirected graph.
@@ -40,11 +42,11 @@ def run_mode(mode: str) -> dict:
         PROMPT,
         "--max-context",
         str(MAX_CONTEXT),
-        "--kv-capacity",
-        str(MAX_CONTEXT),
+        "--context-capacity",
+        CONTEXT_CAPACITY,
         "--prefill-chunk",
         "1024",
-        "--max-new",
+        "--max-tokens",
         str(MAX_NEW),
         "--kv-dtype",
         mode,
@@ -52,8 +54,10 @@ def run_mode(mode: str) -> dict:
         "mtp",
         "--draft-tokens",
         "3",
-        "--lm-head-draft",
-        "--greedy",
+        "--proposal-head",
+        "optimized",
+        "--temperature",
+        "0",
         "--no-thinking",
     ]
     completed = subprocess.run(command, text=True, capture_output=True, timeout=300, check=False)

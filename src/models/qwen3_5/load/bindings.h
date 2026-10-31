@@ -10,7 +10,8 @@
 namespace ninfer::models::qwen3_5::loading {
 
 [[nodiscard]] qwen::FrontendResources bind_resources(artifact::Binder& binder,
-                                                     const Config& config);
+                                                     const Config& config,
+                                                     const LoadOptions& options);
 
 [[nodiscard]] AttentionWeights bind_attention(Bindings& bindings, const TextConfig& config,
                                               const std::string& prefix);

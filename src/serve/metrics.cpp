@@ -499,6 +499,37 @@ std::string Metrics::render(const EngineSnapshot& snapshot, bool ready) const {
             emit("expert_upload_bytes_total", rank.memory.experts->uploaded_bytes - old);
         }
     }
+
+    // llama.cpp --metrics names for scrapers that read llama.cpp servers (the fleet dashboard).
+    // Same warmup baseline as the ninfer_ counters. Seconds are the per-kind execution exposure,
+    // so the rates are computed tokens per accepted-to-retired unit time. As on the fork's
+    // production line, forced thinking-control tokens count as predicted tokens while the
+    // Control forward that commits them is not decode time.
+    const auto llamacpp = [&](std::string_view name, std::string_view type, auto value,
+                              std::string_view help) {
+        out << "# HELP llamacpp:" << name << ' ' << help << '\n'
+            << "# TYPE llamacpp:" << name << ' ' << type << '\n'
+            << "llamacpp:" << name << ' ' << value << '\n';
+    };
+    const auto exposure_seconds = [&](ExecutionKind kind) {
+        const auto i = static_cast<std::size_t>(kind);
+        return (snapshot.executions[i].exposure.total.total_ns -
+                baseline_.executions[i].exposure.total.total_ns) *
+               1e-9;
+    };
+    llamacpp("prompt_tokens_total", "counter",
+             stats.computed_prefill_tokens - baseline.computed_prefill_tokens,
+             "Computed prefill tokens, excluding reused prompt tokens.");
+    llamacpp("prompt_seconds_total", "counter", exposure_seconds(ExecutionKind::Prefill),
+             "Prefill execution exposure.");
+    llamacpp("tokens_predicted_total", "counter",
+             stats.committed_decode_tokens - baseline.committed_decode_tokens,
+             "Committed decode tokens, excluding the first token; includes forced control tokens.");
+    llamacpp("tokens_predicted_seconds_total", "counter", exposure_seconds(ExecutionKind::Decode),
+             "Decode execution exposure; excludes forced control work.");
+    llamacpp("requests_processing", "gauge", stats.running_requests, "Resident requests.");
+    llamacpp("requests_deferred", "gauge", stats.waiting_requests + stats.paused_requests,
+             "Requests waiting for admission or paused for recovery.");
     return out.str();
 }
 

@@ -57,9 +57,13 @@ struct MediaGeometry {
 frontend::ProcessorOptions parse_processor_options(std::string_view image_json,
                                                    std::string_view video_json);
 
-void prepare_control_tokens(models::frontend::TextResources&);
+// Builds the control that closes open reasoning for a thinking budget: a fixed "\n\n " prefix and
+// "\n</think>\n\n" suffix around the body. An unset body selects the Qwen guidance text.
+void prepare_control_tokens(models::frontend::TextResources&,
+                            std::optional<std::string_view> body = std::nullopt);
 
 void parse_resources(FrontendResources& resources, std::uint32_t embedding_rows,
-                     std::optional<MediaGeometry> vision);
+                     std::optional<MediaGeometry> vision,
+                     std::optional<std::string_view> thinking_control);
 
 } // namespace ninfer::models::qwen

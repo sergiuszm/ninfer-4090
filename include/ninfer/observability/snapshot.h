@@ -133,6 +133,8 @@ struct LoadSummary {
     std::uint64_t max_rank_staging_bytes = 0;
     std::size_t device_object_count      = 0;
     std::size_t host_object_count        = 0;
+    // Tokens that close open reasoning when a thinking budget ends it (model-owned control).
+    std::uint32_t thinking_control_tokens = 0;
     ContextCostSummary context_cost;
 };
 

@@ -193,6 +193,9 @@ StartupConfigurationView view(const LaunchOptions& launch, EntryPoint entry, con
         case Field::ThinkingBudget:
             value = optional_value(g.thinking_budget, "none");
             break;
+        case Field::ThinkingControl:
+            value = e.thinking_control.value_or("model");
+            break;
         case Field::Temperature:
             value = optional_value(s.temperature);
             break;

@@ -2,6 +2,8 @@
 
 #include "ninfer/types.h"
 
+#include <optional>
+#include <string>
 #include <string_view>
 
 namespace ninfer::models {
@@ -11,6 +13,7 @@ struct LoadOptions {
     bool vision                    = false;
     SpeculativeBackend speculative = SpeculativeBackend::None;
     ProposalHead proposal_head     = ProposalHead::Full;
+    std::optional<std::string> thinking_control;
 
     bool operator==(const LoadOptions&) const = default;
 
@@ -48,11 +51,12 @@ struct LoadOptions {
     return backend == SpeculativeBackend::DFlash || backend == SpeculativeBackend::DFlash2;
 }
 
-[[nodiscard]] inline LoadOptions load_options(const EngineOptions& options) noexcept {
-    return {.purpose       = options.purpose,
-            .vision        = options.enable_vision,
-            .speculative   = options.speculative.backend,
-            .proposal_head = options.speculative.proposal_head};
+[[nodiscard]] inline LoadOptions load_options(const EngineOptions& options) {
+    return {.purpose          = options.purpose,
+            .vision           = options.enable_vision,
+            .speculative      = options.speculative.backend,
+            .proposal_head    = options.speculative.proposal_head,
+            .thinking_control = options.thinking_control};
 }
 
 } // namespace ninfer::models

@@ -41,6 +41,13 @@ void validate_options(const EngineOptions& options) {
     if (options.media_preprocess_threads > 64) {
         throw std::invalid_argument("Engine media_preprocess_threads must be in [0,64]");
     }
+    // Each rank binds the artifact control and the rank wire does not carry a custom one, so the
+    // coordinator and the ranks would size control work differently. Refused before any worker
+    // starts.
+    if (options.thinking_control && options.deployment && options.deployment->ranks.size() > 1) {
+        throw std::invalid_argument(
+            "a custom thinking control is not supported by multi-rank deployments");
+    }
 }
 
 } // namespace

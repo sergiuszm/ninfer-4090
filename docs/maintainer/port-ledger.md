@@ -350,6 +350,22 @@ Gates:
 - Known open: `ninfer_moe_block_scaled_test` and `ninfer_moe_ep_test` have NVFP4 cases without a
   policy tag; they reach the NVFP4 block-scale MMA, which traps on sm_89.
 
+Stage 4 serve line, stages 5 and 6 serve items (on `1882c6ad`, 2026-10-31). The production line
+is in [rtx4090-serve-line.md](rtx4090-serve-line.md):
+
+| Item | Commits | Notes |
+|---|---|---|
+| Serve line and launchers | `85a9a565` | `--kv-capacity` (tokens) becomes the default `--context-capacity auto` (bytes, KV and State), `--lm-head-draft` becomes `--proposal-head optimized`, `--default-max-tokens` becomes `--max-tokens`. R12 and R13 are dissolved upstream: `--vision-memory-budget` and measured graph memory |
+| S2 read-only `/slots` (slots DROP) | `e3052121` | A serve-side board, one row per lane, no runtime change. No `session_digest`, so the pi slot extension turns itself off. No `POST /slots`. Old slot files stop restoring at the deploy |
+| S1 llama.cpp counters | `594e61b7` | One `/metrics` body. Seconds are upstream's per-kind execution exposure, not the fork's wall-time accumulators. The fork `ninfer:` series are dropped |
+| S4 `context_window`, `modalities` | `53d2ca6a` | |
+| S5 effort tiers | `baadcf7b` | In the Qwen frontend (`template_parameters()`), not in `translate.cpp`: GLM5Next accepts `high`. The 27B template rejects `high`, `max` and `minimal`; they map to `xhigh` and `low`, as in the Flash-Next template |
+| S6 PR #8, non-streaming hunk | `fc76f082` | Upstream fixed the streaming hunk |
+| PR #18 `--thinking-control` | `df8526bc`, `bfa4f7e0`, `5669322c`, `121c8d31` | Bound at model load with the tokenizer resources, not in the frontend: the program sizes its control work from those tokens. GLM5Next refuses a custom body |
+| S3 request-log fields | none | Fork KV names go with K1, `prefill_activations` with PR #15, `recovered_from` with PR #14. Upstream's done line reports MTP acceptance |
+| PR #14 tolerant tool calls | deferred | A redesign on this upstream (the Qwen tool decoder streams). Decided with the tool-constraint default |
+| Review fixes | `60bc3f0f`, `6bfadb18`, `da1028b0`, `92985b91`, `5edf2cbf`, `5bd31d22`, `17d3b2b6`, `0aef1bb4`, `aa650caf`, `0d1e39e9`, `6f2cbe59` | Multi-rank deployments refuse a custom thinking control before any worker starts (the rank wire does not carry it). `/slots` rows are leases released with the request. The effort map applies only to the artifact's own template. Startup reports the control length. The serve line mounts the build directory and the v3 artifact |
+
 ## Community triage 2026-10-07, round 4 (PR #14)
 
 T-Crypt answered the round-3 P1 with `e7495e6c` on 2026-10-06. The commit implements the rule that

@@ -19,6 +19,7 @@ struct RequestLogContext {
     bool stream                             = false;
     std::size_t message_count               = 0;
     std::size_t media_item_count            = 0;
+    int prompt_tokens                       = 0;
     int requested_output_tokens             = 0;
     bool requested_output_tokens_client_set = false;
     std::size_t tool_count                  = 0;

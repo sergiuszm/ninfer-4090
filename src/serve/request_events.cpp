@@ -17,6 +17,7 @@ RequestLogContext make_request_log_context(std::uint64_t id, std::string protoco
     context.stream                             = metadata.stream;
     context.message_count                      = request.messages.size();
     context.media_item_count                   = request.media_item_count();
+    context.prompt_tokens                      = prepared.prompt_tokens;
     context.requested_output_tokens            = request.max_tokens;
     context.requested_output_tokens_client_set = metadata.output_tokens_explicit;
     context.tool_count                         = request.tools.size();

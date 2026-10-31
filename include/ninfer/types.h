@@ -177,6 +177,9 @@ struct EngineOptions {
     bool enable_vision                     = false;
     std::size_t vision_memory_budget_bytes = 1ULL << 30;
     bool use_cuda_graph                    = true;
+    // Body of the control that closes open reasoning when a thinking budget ends it. Unset uses
+    // the model default; the model binds it with its tokenizer resources at load.
+    std::optional<std::string> thinking_control;
     ContextCacheOptions context_cache;
     ContextCostOptions context_cost;
     StartupObserver startup_observer;
