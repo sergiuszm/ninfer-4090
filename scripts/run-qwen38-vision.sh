@@ -21,9 +21,14 @@ fi
 
 printf '%s\n' 'Starting Qwen3.8-27B Vision at http://127.0.0.1:8080/v1'
 printf '%s\n' 'Tested RTX 3090 profile: one request, 32K context, ReplaySSM and MTP3'
+# --context-capacity is left at auto: startup takes the largest KV + State capacity that fits
+# after --memory-headroom (512MiB) and logs the estimated token capacity. It can be lower than
+# --max-context times --max-concurrency; check the startup log.
+# --vision-memory-budget 512MiB: estimate for about 8K Vision features per window; measure
+# max_window_features at startup before relying on it.
 exec "$server" "$model" \
   --host 127.0.0.1 --port 8080 \
-  --max-context 32768 --kv-capacity 32768 \
+  --max-context 32768 \
   --max-concurrency 1 --max-pending-requests 8 \
-  --prefill-chunk 512 --kv-dtype int8 --default-max-tokens 1024 \
-  --vision --spec mtp --draft-tokens 3 --lm-head-draft
+  --prefill-chunk 512 --kv-dtype int8 --max-tokens 1024 \
+  --vision --vision-memory-budget 512MiB --spec mtp --draft-tokens 3 --proposal-head optimized

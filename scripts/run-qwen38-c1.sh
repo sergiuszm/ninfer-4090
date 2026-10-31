@@ -21,9 +21,12 @@ fi
 
 printf '%s\n' 'Starting Qwen3.8-27B at http://127.0.0.1:8080/v1'
 printf '%s\n' 'Profile: one request, 64K context, MTP3, ReplaySSM'
+# --context-capacity is left at auto: startup takes the largest KV + State capacity that fits
+# after --memory-headroom (512MiB) and logs the estimated token capacity. It can be lower than
+# --max-context times --max-concurrency; check the startup log.
 exec "$server" "$model" \
   --host 127.0.0.1 --port 8080 \
-  --max-context 65536 --kv-capacity 65536 \
+  --max-context 65536 \
   --max-concurrency 1 --max-pending-requests 16 \
   --prefill-chunk 1024 --kv-dtype int8 \
-  --spec mtp --draft-tokens 3 --lm-head-draft
+  --spec mtp --draft-tokens 3 --proposal-head optimized

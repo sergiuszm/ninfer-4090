@@ -18,4 +18,9 @@ if not exist "%MODEL%" (
 
 echo Starting Qwen3.6-35B-A3B Vision at http://127.0.0.1:8080/v1
 echo Safe RTX 3090 profile: one request, 32K context, vision enabled, MTP disabled
-"%SERVER%" "%MODEL%" --host 127.0.0.1 --port 8080 --max-context 32768 --kv-capacity 32768 --max-concurrency 1 --max-pending-requests 8 --prefill-chunk 512 --kv-dtype int8 --default-max-tokens 512 --vision --no-thinking --temperature 0.2
+rem --context-capacity is left at auto: startup takes the largest KV + State capacity that fits
+rem after --memory-headroom (512MiB) and logs the estimated token capacity. It can be lower than
+rem --max-context times --max-concurrency; check the startup log.
+rem --vision-memory-budget 512MiB: estimate for about 8K Vision features per window; measure
+rem max_window_features at startup before relying on it.
+"%SERVER%" "%MODEL%" --host 127.0.0.1 --port 8080 --max-context 32768 --max-concurrency 1 --max-pending-requests 8 --prefill-chunk 512 --kv-dtype int8 --max-tokens 512 --vision --vision-memory-budget 512MiB --no-thinking --temperature 0.2
