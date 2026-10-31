@@ -522,7 +522,9 @@ std::string format_server_start_json(const std::string& server_instance_id, std:
              {"thinking_control_tokens", load.thinking_control_tokens},
              {"default_preserve_thinking", options.launch.generation.preserve_thinking
                                                ? Json(*options.launch.generation.preserve_thinking)
-                                               : Json(nullptr)}};
+                                               : Json(nullptr)},
+             {"default_tool_constraints",
+              options.tool_constraints == ToolConstraintMode::Basic ? "basic" : "auto"}};
     record["artifact"] = Json{{"path", options.launch.engine.artifact_path.string()},
                               {"size_bytes", std::move(artifact_size)},
                               {"architecture", load.architecture},
