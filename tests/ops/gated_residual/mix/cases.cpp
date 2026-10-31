@@ -2,6 +2,8 @@
 #include "support.h"
 #include "core/decode_graph.h"
 
+#include <vector>
+
 namespace {
 using namespace ninfer;
 using namespace ninfer::test::hc::mix;
@@ -70,6 +72,12 @@ void add_mix_cases(OpSuite& suite) {
                 if (pattern == mix::Pattern::RowMapping)
                     for (int m : {65, 385, 769}) cases.push_back({m});
             }
+#if defined(NINFER_SM86)
+            // Fork-local (rtx4090-port): above 64 columns the Up projection takes the striped TMA
+            // route, whose descriptor sm_89 cannot encode. Qwen4Exp, its only user, is refused at
+            // startup there, so those cases are not registered.
+            std::erase_if(cases, [](const Case& c) { return c.columns > 64; });
+#endif
             std::vector<OpCase> catalogue;
             for (auto c : cases)
                 catalogue.push_back(
