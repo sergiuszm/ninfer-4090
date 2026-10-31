@@ -67,6 +67,7 @@ do not fit (see the measurements below), so such a boot also needs a smaller `--
 | `--pending-timeout` | 30 s | A request that waits longer in the queue fails before its stream starts: 503 on Chat and Responses, 504 `timeout_error` on Messages (`45f74287`) |
 | `--stats-interval` | 5 s | Was `--log-stats-interval-ms` |
 | `--thinking-control` | model text | Not on the production line (fork PR #18) |
+| `--tool-constraints` | `auto` (fork default; upstream `basic`) | Plan decision 2. pi and llm-eval send no `tool_constraints`, so the server default sets the mode of all their tool calls. `basic` cuts a raw string argument at the first `\n</parameter>` and still returns HTTP 200. `auto` keeps the nested form exact, as production does. Check: `server.default_tool_constraints` in the `server_start` record is `auto` |
 
 ## Measurements
 
