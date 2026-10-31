@@ -1254,9 +1254,12 @@ This fork changes the serve behaviors below. The production line is in
   selects the [tool constraints](#tool-constraints) for requests that do not send
   `tool_constraints`. The fork default is `auto`; upstream defaults to `basic`. Under `basic`, a
   raw Qwen string argument ends at the first `\n</parameter>`. A file write whose content quotes
-  that markup is then cut short, and the response is still HTTP 200. Under `auto`, a quoted
-  `<parameter=NAME>...\n</parameter>` pair is kept exactly. A `\n</parameter>` without an opening
+  that markup is then cut short, and the response is still HTTP 200. Under `auto`, an ordinary
+  non-strict `auto` call uses free generation and keeps a quoted
+  `<parameter=NAME>...\n</parameter>` pair exactly. A `\n</parameter>` without an opening
   `<parameter=` ends the value, and the rest of the call is malformed: the request fails with
-  HTTP 500 `invalid_tool_output`. `--tool-constraints basic` restores the upstream behavior. The
+  `invalid_tool_output` (HTTP 500, or a protocol error event after SSE starts). Calls that stay
+  constrained under `auto` (strict tools, selection or count policies, JSON output with tools) cut
+  quoted markup as `basic` does. `--tool-constraints basic` restores the upstream behavior. The
   effective value is `server.tool_constraints` in `startup_config` and
   `server.default_tool_constraints` in `server_start`.

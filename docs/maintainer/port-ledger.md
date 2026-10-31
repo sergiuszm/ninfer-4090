@@ -429,21 +429,26 @@ upstream's `basic`.
   uses the server default.
 - `server.default_tool_constraints` in `server_start` and `server.tool_constraints` in
   `startup_config` give the effective value.
-- Commits: `ab75df03` (option), `71e9eca3` (request default), `d5a3f054` (`server_start`), tests
-  `cfaff780` and `6179f657`.
+- Commits: `66829dfb` (option), `983d8046` (request default), `2569f215` (`server_start`), tests
+  `9a3cd093` and `67518af5`, review fixes `fe54ec97`, `1163cd98`, `7eb3d7d6` and `6334fc6c`.
 
-Evidence: GPU window 4, a pi `write` call whose content quotes the tool markup. Source: the
-"Decision 2" table in `~/.claude/orchestra/20261031-ninfer/reports/worker7-prefix-hang.md`.
+Evidence: GPU window 4, a pi `write` call (non-streaming, `tool_choice` auto, no strict tools) whose
+content quotes the tool markup. Source (local run notes, not in the repository): the "Decision 2"
+table in `~/.claude/orchestra/20261031-ninfer/reports/worker7-prefix-hang.md`.
 
 | Content | `basic` | `auto` | Production (PR #14) |
 |---|---|---|---|
 | nested `<parameter=..>...\n</parameter>` | cut short, HTTP 200 | exact | exact |
-| bare `\n</parameter>` | cut short, HTTP 200 | HTTP 500 `invalid_tool_output` | HTTP 200, text, no write call |
+| bare `\n</parameter>` | cut short, HTTP 200 | `invalid_tool_output`, HTTP 500 | HTTP 200, text, no write call |
 
-`basic` is the only mode that loses data without an error. The bare-form HTTP 500 is the current
-state until the PR #14 re-port lands (`--tolerant-tool-calls` on the free route, branch
+`basic` is the only mode that loses data without an error. The `auto` column applies to ordinary
+non-strict calls. Strict tools, selection or count policies and JSON output with tools stay
+constrained under `auto` and cut quoted markup as `basic` does. A streaming request gets the
+`invalid_tool_output` failure as an SSE error event after HTTP 200. The bare-form failure is the
+current state until the PR #14 re-port lands (`--tolerant-tool-calls` on the free route, branch
 `c4b-pr14`). It is not the final behavior. Under `auto`, tools with custom stops are accepted, and
-a malformed ordinary call is an HTTP 500 that the `basic` grammar would have prevented.
+a malformed ordinary call fails with `invalid_tool_output`; the `basic` grammar would have
+prevented it.
 
 Integration (2026-10-31): `catchup4b` merges stage 2 (`4b487cc1`) and stage 3 (`d60aeaf0`) on the
 serve merge `c49082f7`. Clean sm_89 build with tests, apps and benches: 1432 targets, 0 errors,
