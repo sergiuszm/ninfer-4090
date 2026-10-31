@@ -202,7 +202,7 @@ __global__ __maxnreg__(NINFER_CAUSAL_PROMPT_I8_MAXNREG) void causal_attention_pr
             x0 = __bfloat162float(q[causal_prompt_q_index<Geometry>(q_head, d0, q0 + row)]);
             x1 = __bfloat162float(q[causal_prompt_q_index<Geometry>(q_head, d1, q0 + row)]);
             // Fork keys are rotated per 64-group (ForkCodec), so Q takes the same H64.
-            kv_cache_hadamard64(x0, x1, FullMask);
+            kv_cache_hadamard64(x0, x1, lane, FullMask);
         }
         float absmax    = fmaxf(fabsf(x0), fabsf(x1));
         absmax          = common::warp_max(absmax, FullMask);

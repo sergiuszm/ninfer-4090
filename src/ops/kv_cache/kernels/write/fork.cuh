@@ -50,8 +50,8 @@ write_fork_group(const __nv_bfloat16* __restrict__ k, const __nv_bfloat16* __res
     float k1                    = __bfloat162float(k[src1]);
     float v0                    = __bfloat162float(v[src0]);
     float v1                    = __bfloat162float(v[src1]);
-    kv_cache_hadamard64(k0, k1, FullMask);
-    kv_cache_hadamard64(v0, v1, FullMask);
+    kv_cache_hadamard64(k0, k1, lane, FullMask);
+    kv_cache_hadamard64(v0, v1, lane, FullMask);
 
     const float k_abs = common::warp_max(fmaxf(fabsf(k0), fabsf(k1)), FullMask);
     const float v_abs = common::warp_max(fmaxf(fabsf(v0), fabsf(v1)), FullMask);

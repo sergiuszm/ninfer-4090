@@ -222,7 +222,7 @@ __launch_bounds__(WarpsPerCta * 32, MinBlocksPerSm) __global__
         float x0 = __bfloat162float(q[causal_q_index<Geometry>(q_head, d0, token)]);
         float x1 = __bfloat162float(q[causal_q_index<Geometry>(q_head, d1, token)]);
         // Fork keys are rotated per 64-group (ForkCodec), so Q takes the same H64.
-        kv_cache_hadamard64(x0, x1, FullMask);
+        kv_cache_hadamard64(x0, x1, lane, FullMask);
         float amax      = fmaxf(fabsf(x0), fabsf(x1));
         amax            = common::warp_max(amax, FullMask);
         const float qs  = amax > 0.0f ? amax / 127.0f : 0.0f;

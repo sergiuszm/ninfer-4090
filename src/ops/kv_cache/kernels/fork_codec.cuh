@@ -38,13 +38,15 @@ __device__ __forceinline__ std::int8_t kv_cache_unpack_i4(std::uint8_t packed, i
     return static_cast<std::int8_t>(static_cast<int>(nibble ^ 8u) - 8);
 }
 
-__device__ __forceinline__ void kv_cache_hadamard64(float& x0, float& x1,
+// H64 of one 64-feature group held by a warp: lane `lane` (0..31) holds features lane and
+// lane + 32. The butterfly side comes from the lane, so the block shape does not matter.
+__device__ __forceinline__ void kv_cache_hadamard64(float& x0, float& x1, int lane,
                                                     unsigned mask = 0xffffffffu) {
 #pragma unroll
     for (int offset = 1; offset < 32; offset <<= 1) {
         const float y0 = __shfl_xor_sync(mask, x0, offset);
         const float y1 = __shfl_xor_sync(mask, x1, offset);
-        const bool hi  = (static_cast<int>(threadIdx.x) & offset) != 0;
+        const bool hi  = (lane & offset) != 0;
         x0             = hi ? y0 - x0 : x0 + y0;
         x1             = hi ? y1 - x1 : x1 + y1;
     }
