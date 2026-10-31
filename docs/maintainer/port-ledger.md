@@ -364,6 +364,7 @@ is in [rtx4090-serve-line.md](rtx4090-serve-line.md):
 | PR #18 `--thinking-control` | `df8526bc`, `bfa4f7e0`, `5669322c`, `121c8d31` | Bound at model load with the tokenizer resources, not in the frontend: the program sizes its control work from those tokens. GLM5Next refuses a custom body |
 | S3 request-log fields | none | Fork KV names go with K1, `prefill_activations` with PR #15, `recovered_from` with PR #14. Upstream's done line reports MTP acceptance |
 | PR #14 tolerant tool calls | deferred | A redesign on this upstream (the Qwen tool decoder streams). Decided with the tool-constraint default |
+| Review fixes | `60bc3f0f`, `6bfadb18`, `da1028b0`, `92985b91`, `5edf2cbf`, `5bd31d22`, `17d3b2b6`, `0aef1bb4`, `aa650caf` | Multi-rank deployments refuse a custom thinking control (the rank wire does not carry it). `/slots` rows are leases released with the request. The effort map applies only to the artifact's own template. Startup reports the control length. The serve line mounts the build directory and the v3 artifact |
 
 ## Community triage 2026-10-07, round 4 (PR #14)
 
