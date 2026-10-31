@@ -585,6 +585,12 @@ void validate_target_options(const execution::ModelProfile& profile, DeviceConte
         throw std::invalid_argument(
             "nvfp4 and k8v4 KV-cache storage require compute capability 12.0");
     }
+    // The fp8 KV attention uses block-scaled FP8 MMA (kind::mxf8f6f4 with UE8M0 group scales,
+    // sm_120a), which traps on sm_89.
+    if (options.kv_cache == KvCacheStorage::Fp8E4m3fnGroup128Ue8m0) {
+        throw std::invalid_argument(
+            "fp8 KV-cache storage requires compute capability 12.0 (block-scaled FP8 MMA)");
+    }
 #else
     if (device.compute_capability() != 120) {
         throw std::invalid_argument("Qwen3.5 family runtime requires compute capability 12.0");
