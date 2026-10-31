@@ -7,6 +7,11 @@ namespace ninfer::models::qwen4_exp {
 Startup::Startup(const artifact::Reader& definition_source, const artifact::Reader& rank_source,
                  const EngineOptions& options, Device device)
     : reader_(rank_source), definition_(read_definition(definition_source, load_options(options))) {
+#if defined(NINFER_SM86)
+    // Fork-local (rtx4090-port): the sm_89 build traps the Qwen4Exp TMA mix and block-scaled
+    // MoE kernels, so the architecture is refused before any weight is planned.
+    throw std::invalid_argument("Qwen4Exp runtime requires compute capability 12.0");
+#endif
     if (options.deployment) {
         const auto parallel = plan_parallel(*definition_, *options.deployment);
         if (parallel.ranks.size() != 1)

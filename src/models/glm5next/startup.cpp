@@ -194,6 +194,11 @@ Startup::Startup(const artifact::Reader& reader, const artifact::Reader& rank,
                  const EngineOptions& options, Device)
     : definition_(read_definition(reader, load_options(options))),
       index_format_(index_format_from_environment()) {
+#if defined(NINFER_SM86)
+    // Fork-local (rtx4090-port): the sm_89 build traps the GLM5Next FP8 MLA and block-scaled MoE
+    // kernels, so the architecture is refused before any weight is planned.
+    throw std::invalid_argument("GLM5Next runtime requires compute capability 12.0");
+#endif
     if (reader.artifact_id() != rank.artifact_id())
         throw artifact::ArtifactError("GLM5Next local artifact differs from coordinator");
     rank_ = options.deployment ? plan_parallel(*definition_, *options.deployment).ranks.at(0)
