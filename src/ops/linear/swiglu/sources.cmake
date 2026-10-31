@@ -9,6 +9,7 @@ target_sources(ninfer_ops PRIVATE
   "${CMAKE_CURRENT_LIST_DIR}/fp8/shapes/n34816_k5120/a8.cu"
   "${CMAKE_CURRENT_LIST_DIR}/nvfp4/shapes/n34816_k5120/a16.cu"
   "${CMAKE_CURRENT_LIST_DIR}/nvfp4/shapes/n34816_k5120/a4.cu"
+  "${CMAKE_CURRENT_LIST_DIR}/q4/shapes/n34816_k5120/int8.cu"
   "${CMAKE_CURRENT_LIST_DIR}/q4/shapes/n34816_k5120/materialized.cu"
   "${CMAKE_CURRENT_LIST_DIR}/q4/shapes/n34816_k5120/mma.cu"
   "${CMAKE_CURRENT_LIST_DIR}/q4/shapes/n34816_k5120/small.cu"
