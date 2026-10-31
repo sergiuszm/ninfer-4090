@@ -251,10 +251,12 @@ The three protocols share these tool-selection semantics; each model supplies it
 | OpenAI `parallel_tool_calls:false` / Anthropic `disable_parallel_tool_use:true` | At most one call; exactly one when a call is required |
 
 OpenAI `allowed_tools` supports `auto` and `required`. Selection changes generation permissions,
-while all declarations retain their original order in the prompt. Requests with tools enable
-**basic structural constraints by default**, including ordinary `auto` calls without `strict`.
-The model can answer normally or start a tool call; a call must use the model's tool framing and a
-declared function name.
+while all declarations retain their original order in the prompt. Under `basic` tool constraints,
+requests with tools enable **basic structural constraints**, including ordinary `auto` calls
+without `strict`. The model can answer normally or start a tool call; a call must use the model's
+tool framing and a declared function name. `--tool-constraints auto|basic` selects the mode for
+requests that do not send `tool_constraints`. This fork defaults to `auto`; see
+[RTX 4090 fork notes](#rtx-4090-fork-notes).
 
 Non-strict parameter names and order remain open. Encoding hints do not enable strict schema
 assertions, so open objects, root unions, and unsupported assertions remain usable. Each call's
@@ -263,9 +265,11 @@ speculative lookahead. Different calls can reuse the same names. Previously publ
 never overwritten.
 `strict:true` additionally enforces the parameter contract below.
 
-Top-level `tool_constraints:"auto"` opts into request-driven constraints: ordinary non-strict
-`tool_choice:"auto"` then uses free generation. Strict tools, selection/count restrictions, and
-`tool_choice:"none"` still enforce their requirements. `tool_constraints:"basic"` is the default.
+Under `auto` (request-driven constraints), ordinary non-strict `tool_choice:"auto"` uses free
+generation. Strict tools, selection/count restrictions, and `tool_choice:"none"` still enforce
+their requirements. Chat Completions and Anthropic Messages accept a top-level
+`tool_constraints:"auto"|"basic"` that replaces the server default for one request; `null` keeps
+the server default. Responses has no such field and always uses the server default.
 
 With JSON object/schema output, `auto` permits either a JSON answer or a complete tool-call sequence.
 Required/named choices permit calls for that turn; after supplying the tool result, use `auto` for
@@ -289,7 +293,8 @@ representations. Unsupported schemas fail with HTTP 400 before generation.
 For `auto` without JSON output, text can precede the first call. Required/named choices start directly with calls
 (after thinking, if enabled). Once a constrained call starts, the suffix consists of complete calls
 and model EOS. Active tool constraints require model EOS and reject custom stop strings.
-For ordinary non-strict auto calls that need custom stops, select `tool_constraints:"auto"`.
+Ordinary non-strict auto calls accept custom stops under `auto`. If the server runs with
+`--tool-constraints basic`, such a request must send `tool_constraints:"auto"`.
 Tool names are published as soon as their complete declared header is recognized. Parameters are
 JSON-encoded incrementally, including within long strings and JSON containers; concatenating a
 call's argument deltas produces its final `arguments_json`. Each call has stable wire identifiers
@@ -1245,3 +1250,16 @@ This fork changes the serve behaviors below. The production line is in
   start after warmup, as the `ninfer_` counters do.
 - **Model fields.** `/v1/models` entries also carry `context_window` (the value of
   `max_model_len`) and `modalities` with a `vision` boolean.
+- **Tool-constraint default.** `--tool-constraints auto|basic` (TOML `server.tool_constraints`)
+  selects the [tool constraints](#tool-constraints) for requests that do not send
+  `tool_constraints`. The fork default is `auto`; upstream defaults to `basic`. Under `basic`, a
+  raw Qwen string argument ends at the first `\n</parameter>`. A file write whose content quotes
+  that markup is then cut short, and the response is still HTTP 200. Under `auto`, an ordinary
+  non-strict `auto` call uses free generation and keeps a quoted
+  `<parameter=NAME>...\n</parameter>` pair exactly. A `\n</parameter>` without an opening
+  `<parameter=` ends the value, and the rest of the call is malformed: the request fails with
+  `invalid_tool_output` (HTTP 500, or a protocol error event after SSE starts). Calls that stay
+  constrained under `auto` (strict tools, selection or count policies, JSON output with tools) cut
+  quoted markup as `basic` does. `--tool-constraints basic` restores the upstream behavior. The
+  effective value is `server.tool_constraints` in `startup_config` and
+  `server.default_tool_constraints` in `server_start`.

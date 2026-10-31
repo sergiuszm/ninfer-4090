@@ -95,7 +95,15 @@ struct ServeOptions {
     std::size_t max_request_bytes          = kDefaultMaxRequestBytes;
     std::size_t response_store_max_records = kDefaultResponseStoreRecords;
     std::size_t response_store_max_bytes   = kDefaultResponseStoreBytes;
+    // Fork-local (catch-up #4 decision 2): upstream requests default to Basic. Under Basic a raw
+    // string argument ends at the first "\n</parameter>", so quoted tool markup is cut silently.
+    ToolConstraintMode tool_constraints = ToolConstraintMode::Automatic;
 };
+
+// Option and protocol spelling of a tool-constraint mode.
+[[nodiscard]] constexpr std::string_view tool_constraints_name(ToolConstraintMode mode) noexcept {
+    return mode == ToolConstraintMode::Basic ? "basic" : "auto";
+}
 
 [[nodiscard]] CliOptions parse_cli_options(int argc, char** argv);
 [[nodiscard]] ServeOptions parse_serve_options(int argc, char** argv);

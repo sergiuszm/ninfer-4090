@@ -237,6 +237,19 @@ int main() {
               "resolved context-cache configuration missing");
     failures += check(server.at("server").at("default_preserve_thinking") == true,
                       "server preserve-thinking default missing");
+    // Fork-local (catch-up #4 decision 2).
+    failures += check(server.at("server").at("default_tool_constraints") == "auto" &&
+                          startup.at("configuration").at("server.tool_constraints") == "auto" &&
+                          startup.at("sources").at("server.tool_constraints").at("kind") ==
+                              "default",
+                      "server tool-constraint default missing");
+    options.tool_constraints = ninfer::ToolConstraintMode::Basic;
+    const Json basic_tools   = Json::parse(format_server_start_json(
+        "serve-test", 1000, options, engine_options, sampling_defaults, "deployment-alias",
+        description, startup_report, snapshot, environment, std::uint64_t{123456}));
+    options.tool_constraints = ninfer::ToolConstraintMode::Automatic;
+    failures += check(basic_tools.at("server").at("default_tool_constraints") == "basic",
+                      "server tool-constraint option missing");
     failures +=
         check(server.at("sampling_defaults").at("thinking").at("temperature") == 1.0 &&
                   server.at("sampling_defaults").at("non_thinking").at("presence_penalty") == 1.5,

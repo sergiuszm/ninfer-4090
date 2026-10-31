@@ -216,6 +216,60 @@ void test_fork_kv_dtypes() {
     }
 }
 
+// Fork-local (catch-up #4 decision 2): requests that omit tool_constraints use auto unless
+// --tool-constraints basic restores upstream's default.
+void test_tool_constraints() {
+    using ninfer::ToolConstraintMode;
+    using ninfer::product::ConfigSourceKind;
+    const auto shown = [](const ServeOptions& options, std::string_view value,
+                          ConfigSourceKind source) {
+        for (const auto& item : ninfer::product::configuration_view(options).items)
+            if (item.key == "server.tool_constraints")
+                return std::get<std::string>(item.value) == value && item.source.kind == source;
+        return false;
+    };
+    const auto defaults = parse({"ninfer-serve", "model.ninfer"});
+    require(defaults.tool_constraints == ToolConstraintMode::Automatic &&
+                shown(defaults, "auto", ConfigSourceKind::Default),
+            "server tool constraints do not default to auto in the startup configuration");
+    const auto basic = parse({"ninfer-serve", "model.ninfer", "--tool-constraints", "basic"});
+    require(basic.tool_constraints == ToolConstraintMode::Basic &&
+                shown(basic, "basic", ConfigSourceKind::CommandLine),
+            "--tool-constraints basic was not applied and shown");
+    require(parse({"ninfer-serve", "model.ninfer", "--tool-constraints", "basic",
+                   "--tool-constraints=auto"})
+                    .tool_constraints == ToolConstraintMode::Automatic,
+            "--tool-constraints=auto did not override an earlier value");
+    for (const auto* value : {"strict", "Auto", "", "none"}) {
+        rejects([&] {
+            (void)parse({"ninfer-serve", "model.ninfer", "--tool-constraints", value});
+        });
+    }
+    rejects([] { (void)parse({"ninfer-serve", "model.ninfer", "--tool-constraints"}); });
+
+    const auto chat = RequestJson::parse(
+        R"({"model":"m","messages":[{"role":"user","content":"hi"}],"tools":[{"type":"function","function":{"name":"write","parameters":{"type":"object"}}}]})");
+    const auto chat_default = parse_chat_completion_request(chat, request_limits(defaults));
+    require(chat_default.generation.tool_choice.constraints == ToolConstraintMode::Automatic &&
+                !chat_default.generation.constrains_tools(),
+            "default server options constrained ordinary Chat tools");
+    const auto chat_basic = parse_chat_completion_request(chat, request_limits(basic));
+    require(chat_basic.generation.tool_choice.constraints == ToolConstraintMode::Basic &&
+                chat_basic.generation.constrains_tools(),
+            "--tool-constraints basic did not restore upstream Chat constraints");
+    const auto messages = RequestJson::parse(
+        R"({"model":"m","max_tokens":16,"messages":[{"role":"user","content":"hi"}],"tools":[{"name":"write","input_schema":{"type":"object"}}]})");
+    const auto messages_default =
+        parse_anthropic_messages_request(messages, request_limits(defaults));
+    require(messages_default.generation.tool_choice.constraints == ToolConstraintMode::Automatic &&
+                !messages_default.generation.constrains_tools(),
+            "default server options constrained ordinary Messages tools");
+    const auto messages_basic = parse_anthropic_messages_request(messages, request_limits(basic));
+    require(messages_basic.generation.tool_choice.constraints == ToolConstraintMode::Basic &&
+                messages_basic.generation.constrains_tools(),
+            "--tool-constraints basic did not restore upstream Messages constraints");
+}
+
 } // namespace
 
 int main() {
@@ -226,6 +280,7 @@ int main() {
         test_effort_tiers_reach_the_frontend();
         test_provenance();
         test_fork_kv_dtypes();
+        test_tool_constraints();
         std::cout << "ok\n";
         return 0;
     } catch (const std::exception& error) {

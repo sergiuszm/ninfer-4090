@@ -66,6 +66,7 @@ api_key = "" # Empty disables authentication; display and logs show only disable
 model_id = "" # Empty uses the artifact's public name.
 cors = false
 max_request_size = "384MiB"
+tool_constraints = "auto" # auto or basic; requests without tool_constraints use it.
 
 [server.responses]
 max_records = 1024

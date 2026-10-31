@@ -496,6 +496,10 @@ ParsedOptions parse(int argc, char** argv, EntryPoint entry,
         case Field::MaxRequestSize:
             parsed.serve.max_request_bytes = u64();
             break;
+        case Field::ToolConstraints:
+            parsed.serve.tool_constraints =
+                string() == "basic" ? ToolConstraintMode::Basic : ToolConstraintMode::Automatic;
+            break;
         case Field::ResponseRecords:
             parsed.serve.response_store_max_records = u64();
             break;

@@ -238,6 +238,9 @@ StartupConfigurationView view(const LaunchOptions& launch, EntryPoint entry, con
         case Field::MaxRequestSize:
             value = std::uint64_t{server->max_request_bytes};
             break;
+        case Field::ToolConstraints:
+            value = std::string(tool_constraints_name(server->tool_constraints));
+            break;
         case Field::ResponseRecords:
             value = std::uint64_t{server->response_store_max_records};
             break;

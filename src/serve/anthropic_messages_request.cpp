@@ -1083,7 +1083,7 @@ AnthropicMessagesRequest parse_anthropic_messages_request(const Json& body,
         }
     }
     parse_generation_fields(body, result.generation);
-    parse_structured_outputs(body, result.generation);
+    parse_structured_outputs(body, result.generation, limits.default_tool_constraints);
     return result;
 }
 

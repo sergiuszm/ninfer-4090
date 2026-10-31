@@ -439,6 +439,49 @@ int test_tools() {
     return failures;
 }
 
+// Fork-local (catch-up #4 decision 2): the server default applies when the body omits
+// tool_constraints, and the body field overrides it.
+int test_tool_constraint_default() {
+    using ninfer::ToolConstraintMode;
+    int failures  = 0;
+    Json body     = base_request();
+    body["tools"] = Json::array({ordinary_tool()});
+
+    const auto parse_with = [&](ToolConstraintMode mode) {
+        RequestLimits value            = limits();
+        value.default_tool_constraints = mode;
+        return parse_anthropic_messages_request(body, value).generation;
+    };
+    const GenerationRequest automatic = parse_with(ToolConstraintMode::Automatic);
+    failures += check(automatic.tool_choice.constraints == ToolConstraintMode::Automatic &&
+                          !automatic.constrains_tools() &&
+                          to_request_options(automatic, {}, true).tool_choice.constraints ==
+                              ToolConstraintMode::Automatic,
+                      "auto server default did not reach Messages request options");
+    failures += check(parse_with(ToolConstraintMode::Basic).constrains_tools(),
+                      "basic server default did not restore upstream Messages constraints");
+    body["tool_constraints"] = "basic";
+    failures += check(parse_with(ToolConstraintMode::Automatic).constrains_tools(),
+                      "Messages body basic did not override the auto default");
+    body["tool_constraints"] = "auto";
+    failures += check(!parse_with(ToolConstraintMode::Basic).constrains_tools(),
+                      "Messages body auto did not override the basic default");
+    body["tool_constraints"] = nullptr;
+    failures += check(!parse_with(ToolConstraintMode::Automatic).constrains_tools() &&
+                          parse_with(ToolConstraintMode::Basic).constrains_tools(),
+                      "Messages null tool_constraints did not select the server default");
+    for (const Json& invalid : {Json("none"), Json(0)}) {
+        body["tool_constraints"] = invalid;
+        ApiError error{.status = 0};
+        try {
+            (void)parse_with(ToolConstraintMode::Automatic);
+        } catch (const ApiException& exception) { error = exception.error(); }
+        failures += check(error.status == 400 && error.param == "tool_constraints",
+                          "invalid Messages tool_constraints was accepted: " + invalid.dump());
+    }
+    return failures;
+}
+
 int test_prompt_object_order() {
     const auto parse_raw = [](std::string_view input) {
         const std::string body =
@@ -868,6 +911,7 @@ int main() {
     failures += test_attribution_system_block();
     failures += test_tool_history();
     failures += test_tools();
+    failures += test_tool_constraint_default();
     failures += test_prompt_object_order();
     failures += test_thinking_and_count_tokens();
     failures += test_thinking_history_transport_metadata();

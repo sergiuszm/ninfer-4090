@@ -3,6 +3,7 @@
 #include "serve/http_transport.h"
 #include "serve/openai_chat.h"
 #include "serve/openai_common.h"
+#include "serve/translate.h"
 
 #include <atomic>
 #include <cstddef>
@@ -25,9 +26,7 @@ std::string sse_error_event(const ApiError& error) {
 void HttpServer::handle_chat_completions(const httplib::Request& req, httplib::Response& res) {
     OpenAIChatRequest request;
     try {
-        RequestLimits limits;
-        limits.default_max_tokens = options_.launch.generation.max_tokens;
-        request                   = parse_chat_completion_request(parse_json_body(req), limits);
+        request = parse_chat_completion_request(parse_json_body(req), request_limits(options_));
         validate_openai_model(request.model, public_model_id_);
     } catch (const ApiException& exception) {
         write_openai_error(res, exception.error());

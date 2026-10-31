@@ -2,6 +2,7 @@
 
 #include "serve/anthropic_messages.h"
 #include "serve/http_transport.h"
+#include "serve/translate.h"
 
 #include <atomic>
 #include <cstddef>
@@ -40,9 +41,7 @@ void HttpServer::handle_messages(const httplib::Request& req, httplib::Response&
 
     AnthropicMessagesRequest request;
     try {
-        RequestLimits limits;
-        limits.default_max_tokens = options_.launch.generation.max_tokens;
-        request                   = parse_anthropic_messages_request(parse_json_body(req), limits);
+        request = parse_anthropic_messages_request(parse_json_body(req), request_limits(options_));
     } catch (const ApiException& exception) {
         write_anthropic_error(res, exception.error(), request_id);
         return;

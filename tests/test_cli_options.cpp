@@ -225,6 +225,32 @@ engine.prefill_activations = 8
     rejection([&] { serve({"ninfer-serve", "--config", path.string()}); });
 }
 
+// Fork-local (catch-up #4 decision 2): server.tool_constraints is a serve-only file setting.
+void test_tool_constraints_file(const Files& files) {
+    auto path = files.write(R"(
+model.path = 'model.ninfer'
+cli.prompt = 'hello'
+[server]
+tool_constraints = 'basic'
+)");
+    require(serve({"ninfer-serve", "--config", path.string()}).tool_constraints ==
+                ninfer::ToolConstraintMode::Basic,
+            "file tool constraints were lost");
+    require(serve({"ninfer-serve", "--config", path.string(), "--tool-constraints", "auto"})
+                    .tool_constraints == ninfer::ToolConstraintMode::Automatic,
+            "command line did not override file tool constraints");
+    (void)parse({"ninfer", "--config", path.string()});
+    rejection(
+        [] { parse({"ninfer", "model.ninfer", "--prompt", "x", "--tool-constraints", "auto"}); });
+    path = files.write(R"(
+model.path = 'model.ninfer'
+server.tool_constraints = 'strict'
+)");
+    const auto message = rejection([&] { serve({"ninfer-serve", "--config", path.string()}); });
+    require(message.find(path.string() + ":") != std::string::npos,
+            "invalid file tool constraints lost their source location");
+}
+
 void test_file_merge(const Files& files) {
     const auto path = files.write(R"(
 [model]
@@ -463,6 +489,7 @@ int main() {
         test_arguments();
         test_memory_headroom(files);
         test_prefill_activations(files);
+        test_tool_constraints_file(files);
         test_file_merge(files);
         test_file_errors_and_example(files);
         test_deployment(files);

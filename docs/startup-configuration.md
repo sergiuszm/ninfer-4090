@@ -205,6 +205,7 @@ for examples and interactions with tools and stops.
 | `server.model_id` | `--model-id` | String / `""` | Public alias; empty uses artifact metadata |
 | `server.cors` | `--cors` / `--no-cors` | bool / false | Cross-origin responses |
 | `server.max_request_size` | `--max-request-size` | Positive bytes / `384MiB` | HTTP body limit |
+| `server.tool_constraints` | `--tool-constraints` | `auto` or `basic` / `auto` (fork; upstream `basic`) | [Tool constraints](serving.md#tool-constraints) for requests without `tool_constraints` |
 | `server.responses.max_records` | `--response-store-max-records` | Positive uint64 / 1024 | Process-local Responses history count |
 | `server.responses.max_size` | `--response-store-max-size` | Positive bytes / `256MiB` | Responses history size, separate from Context |
 | `logging.level` | `--log-level` | `trace/debug/info/warning/error/critical/off` / `info` | Diagnostic verbosity |

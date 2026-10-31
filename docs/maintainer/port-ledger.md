@@ -274,7 +274,8 @@ Decisions (2026-10-07):
   new cache.
 - PR #14 tolerant tool calls: carried, active only on the unconstrained tool-call route.
 - R4 automatic long anchors: DROP.
-- Upstream tool constraints on by default: decided after the stage 4 gate.
+- Upstream tool constraints on by default: decided after the stage 4 gate. Decided 2026-10-31
+  (plan decision 2): the server default is `auto`, see "Tool-constraint default" below.
 
 File map: `docs/maintainer/catchup-4-filemap.tsv` lists the 207 non-docs files that the fork
 changed since `d4929686`. The columns are the file status at `1882c6ad`, the upstream path, the
@@ -416,6 +417,38 @@ is in [rtx4090-serve-line.md](rtx4090-serve-line.md):
 | S3 request-log fields | none | Fork KV names go with K1, `prefill_activations` with PR #15, `recovered_from` with PR #14. Upstream's done line reports MTP acceptance |
 | PR #14 tolerant tool calls | deferred | A redesign on this upstream (the Qwen tool decoder streams). Decided with the tool-constraint default |
 | Review fixes | `60bc3f0f`, `6bfadb18`, `da1028b0`, `92985b91`, `5edf2cbf`, `5bd31d22`, `17d3b2b6`, `0aef1bb4`, `aa650caf`, `0d1e39e9`, `6f2cbe59` | Multi-rank deployments refuse a custom thinking control before any worker starts (the rank wire does not carry it). `/slots` rows are leases released with the request. The effort map applies only to the artifact's own template. Startup reports the control length. The serve line mounts the build directory and the v3 artifact |
+
+Tool-constraint default (plan decision 2, 2026-10-31): the server default is `auto`, not
+upstream's `basic`.
+
+- `--tool-constraints auto|basic` (TOML `server.tool_constraints`) sets
+  `ServeOptions::tool_constraints`. It applies to requests that do not send `tool_constraints`.
+- The library default `ToolChoice::constraints = Basic` does not change. The CLI, the benches and
+  library users keep the upstream behavior.
+- Chat and Messages keep the per-request `tool_constraints` field. Responses has no such field and
+  uses the server default.
+- `server.default_tool_constraints` in `server_start` and `server.tool_constraints` in
+  `startup_config` give the effective value.
+- Commits: `66829dfb` (option), `983d8046` (request default), `2569f215` (`server_start`), tests
+  `9a3cd093` and `67518af5`, review fixes `fe54ec97`, `1163cd98`, `7eb3d7d6` and `6334fc6c`.
+
+Evidence: GPU window 4, a pi `write` call (non-streaming, `tool_choice` auto, no strict tools) whose
+content quotes the tool markup. Source (local run notes, not in the repository): the "Decision 2"
+table in `~/.claude/orchestra/20261031-ninfer/reports/worker7-prefix-hang.md`.
+
+| Content | `basic` | `auto` | Production (PR #14) |
+|---|---|---|---|
+| nested `<parameter=..>...\n</parameter>` | cut short, HTTP 200 | exact | exact |
+| bare `\n</parameter>` | cut short, HTTP 200 | `invalid_tool_output`, HTTP 500 | HTTP 200, text, no write call |
+
+`basic` is the only mode that loses data without an error. The `auto` column applies to ordinary
+non-strict calls. Strict tools, selection or count policies and JSON output with tools stay
+constrained under `auto` and cut quoted markup as `basic` does. A streaming request gets the
+`invalid_tool_output` failure as an SSE error event after HTTP 200. The bare-form failure is the
+current state until the PR #14 re-port lands (`--tolerant-tool-calls` on the free route, branch
+`c4b-pr14`). It is not the final behavior. Under `auto`, tools with custom stops are accepted, and
+a malformed ordinary call fails with `invalid_tool_output`; the `basic` grammar would have
+prevented it.
 
 Integration (2026-10-31): `catchup4b` merges stage 2 (`4b487cc1`) and stage 3 (`d60aeaf0`) on the
 serve merge `c49082f7`. Clean sm_89 build with tests, apps and benches: 1432 targets, 0 errors,
