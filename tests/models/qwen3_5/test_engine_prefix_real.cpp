@@ -4,11 +4,18 @@
 #include "symbol_interpose.h"
 
 #include <cuda_runtime_api.h>
+#include <dirent.h>
+#include <execinfo.h>
+#include <pthread.h>
+#include <sys/syscall.h>
+#include <unistd.h>
 
 #include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
+#include <csignal>
+#include <cstdio>
 #include <cstdint>
 #include <cstdlib>
 #include <iomanip>
@@ -58,6 +65,109 @@ ninfer::PrefillActivations prefill_activations_under_test() {
 // the model EOS stops. The reuse steps that declare tools and count a fixed number of outputs with
 // model stops off use this mode; they test prefix reuse, not the tool grammar.
 constexpr auto kUnconstrainedTools = ninfer::ToolConstraintMode::Automatic;
+
+// Fork-local (catch-up #4): while one step runs longer than `after`, print the engine's request
+// counters and context pools every `every`, so a stalled step shows its scheduling state.
+class StallReporter {
+public:
+    explicit StallReporter(const ninfer::Engine& engine,
+                           std::chrono::seconds after = std::chrono::seconds(60),
+                           std::chrono::seconds every = std::chrono::seconds(30))
+        : engine_(engine), after_(after), every_(every),
+          thread_([this](std::stop_token stop) { run(stop); }) {}
+
+    void step(std::string_view name) {
+        std::lock_guard lock(mutex_);
+        step_  = name;
+        since_ = std::chrono::steady_clock::now();
+    }
+
+private:
+    void run(std::stop_token stop) {
+        std::unique_lock lock(mutex_);
+        while (!stop.stop_requested()) {
+            wake_.wait_for(lock, stop, every_, [] { return false; });
+            if (stop.stop_requested()) break;
+            const auto running = std::chrono::steady_clock::now() - since_;
+            if (step_.empty() || running < after_) continue;
+            const auto stats = engine_.snapshot().runtime;
+            std::cerr << "prefix_real stall " << step_ << " running "
+                      << std::chrono::duration_cast<std::chrono::seconds>(running).count()
+                      << " s: running " << stats.running_requests << " prefilling "
+                      << stats.prefilling_requests << " decode_ready " << stats.decode_ready_requests
+                      << " waiting " << stats.waiting_requests << " paused " << stats.paused_requests
+                      << " replaying " << stats.replaying_requests << " materializing "
+                      << stats.materializing_requests << " capture_pending "
+                      << stats.capture_pending_requests << " terminal_pending "
+                      << stats.terminal_pending_requests << " generated " << stats.generated_tokens
+                      << " prefill " << stats.computed_prefill_tokens << " root/checkpoint "
+                      << stats.root_selections << '/' << stats.checkpoint_selections
+                      << " state_objects " << stats.state_objects << " moves " << stats.state_moves;
+            for (const auto& pool : stats.context_pools)
+                std::cerr << " | pool " << static_cast<int>(pool.domain) << " capacity "
+                          << pool.capacity_bytes << " block " << pool.block_bytes << " live "
+                          << pool.live_bytes << " reserved " << pool.reserved_bytes
+                          << " retiring " << pool.pending_retirement_bytes;
+            std::cerr << '\n';
+        }
+    }
+
+    const ninfer::Engine& engine_;
+    const std::chrono::seconds after_, every_;
+    std::mutex mutex_;
+    std::condition_variable_any wake_;
+    std::string_view step_;
+    std::chrono::steady_clock::time_point since_;
+    std::jthread thread_;
+};
+
+// Fork-local (catch-up #4): SIGUSR1 prints every thread's stack to stderr. Window 5 showed one
+// thread spinning at 100% CPU and cuda-gdb could not attach. A sigwait thread receives SIGUSR1
+// and sends SIGUSR2 to each thread in turn; the SIGUSR2 handler writes that thread's backtrace.
+void ignore_signal(int) {}
+
+void dump_thread_stack(int) {
+    void* frames[64];
+    const int count = backtrace(frames, 64);
+    char header[64];
+    const int length = std::snprintf(header, sizeof header, "prefix_real stack tid %ld\n",
+                                     static_cast<long>(syscall(SYS_gettid)));
+    if (length > 0) (void)!write(STDERR_FILENO, header, static_cast<std::size_t>(length));
+    backtrace_symbols_fd(frames, count, STDERR_FILENO);
+}
+
+void install_stack_dumper() {
+    void* warm[1];
+    (void)backtrace(warm, 1); // loads the unwinder before any signal arrives
+    struct sigaction action {};
+    sigemptyset(&action.sa_mask);
+    action.sa_flags   = SA_RESTART;
+    action.sa_handler = dump_thread_stack;
+    sigaction(SIGUSR2, &action, nullptr);
+    action.sa_handler = ignore_signal;
+    sigaction(SIGUSR1, &action, nullptr);
+    sigset_t request;
+    sigemptyset(&request);
+    sigaddset(&request, SIGUSR1);
+    // Every later thread (engine, CUDA) inherits the block, so only the sigwait thread takes it.
+    pthread_sigmask(SIG_BLOCK, &request, nullptr);
+    std::thread([request] {
+        for (;;) {
+            int received = 0;
+            if (sigwait(&request, &received) != 0) continue;
+            const long self = syscall(SYS_gettid);
+            if (DIR* tasks = opendir("/proc/self/task")) {
+                while (const dirent* entry = readdir(tasks)) {
+                    const long tid = std::strtol(entry->d_name, nullptr, 10);
+                    if (tid <= 0 || tid == self) continue;
+                    syscall(SYS_tgkill, getpid(), tid, SIGUSR2);
+                    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                }
+                closedir(tasks);
+            }
+        }
+    }).detach();
+}
 
 ninfer::EngineOptions engine_options(const char* artifact) {
     ninfer::EngineOptions options;
@@ -726,7 +836,19 @@ int exercise_host_restore(const char* artifact) {
     };
     const auto backed_up = transfer_bytes(after_pressure, 0) - transfer_bytes(before_pressure, 0);
     if (pressure_result.generated_token_ids.size() != 2 || backed_up == 0) {
-        std::cerr << "Host pressure did not demote checkpoint records\n";
+        std::cerr << "Host pressure did not demote checkpoint records";
+        // Fork-local (catch-up #4): the counts and pools of the window 5 failure.
+        std::cerr << ": generated=" << pressure_result.generated_token_ids.size()
+                  << " backed_up=" << backed_up << " reused="
+                  << pressure_result.stats.reused_prompt_tokens << " path="
+                  << static_cast<int>(pressure_result.stats.prefix_reuse_path)
+                  << " state_objects " << before_pressure.state_objects << "->"
+                  << after_pressure.state_objects;
+        for (const auto& pool : after_pressure.context_pools)
+            std::cerr << " | pool " << static_cast<int>(pool.domain) << " capacity "
+                      << pool.capacity_bytes << " block " << pool.block_bytes << " live "
+                      << pool.live_bytes << " reserved " << pool.reserved_bytes;
+        std::cerr << '\n';
         return 1;
     }
 
@@ -1214,6 +1336,9 @@ int exercise_shared_rewrite_materialization(const char* artifact) {
 
 int exercise_explicit_anchor_branch(const char* artifact) {
     ninfer::Engine engine(explicit_anchor_engine_options(artifact));
+    // Fork-local (catch-up #4): window 5 stalled here alone.
+    StallReporter stalls(engine, std::chrono::seconds(20), std::chrono::seconds(10));
+    stalls.step("explicit_anchor_branch");
 
     const auto input = [](std::vector<std::string> turns,
                           std::optional<std::uint32_t> marker_after) {
@@ -1639,8 +1764,14 @@ int exercise_rewrite_branch(const char* artifact) {
 
 int exercise_late_instructions(const char* artifact) {
     auto configured = explicit_anchor_engine_options(artifact);
-    ninfer::test::qwen3_5::set_context_capacity(configured);
+    // Fork-local (catch-up #4): NINFER_PREFIX_REAL_LATE_RETAINED=<n> adds retained states to the
+    // capacity (upstream: 0), to test whether the window 5 stall depends on an exact capacity.
+    const char* retained = std::getenv("NINFER_PREFIX_REAL_LATE_RETAINED");
+    ninfer::test::qwen3_5::set_context_capacity(
+        configured, retained ? static_cast<std::uint32_t>(std::strtoul(retained, nullptr, 10)) : 0U);
     ninfer::Engine engine(std::move(configured));
+    StallReporter stalls(engine, std::chrono::seconds(20), std::chrono::seconds(10));
+    stalls.step("late_instructions");
     const auto text_message = [](ninfer::ChatRole role, std::string text) {
         ninfer::ChatMessage message;
         message.role = role;
@@ -2067,49 +2198,6 @@ void trace_step(std::string_view step) {
               << " s\n";
 }
 
-// While one shared-engine step runs longer than 60 s, print the engine's request counters every
-// 30 s, so a stalled step shows its scheduling state.
-class StallReporter {
-public:
-    explicit StallReporter(const ninfer::Engine& engine)
-        : engine_(engine), thread_([this](std::stop_token stop) { run(stop); }) {}
-
-    void step(std::string_view name) {
-        std::lock_guard lock(mutex_);
-        step_  = name;
-        since_ = std::chrono::steady_clock::now();
-    }
-
-private:
-    void run(std::stop_token stop) {
-        std::unique_lock lock(mutex_);
-        while (!stop.stop_requested()) {
-            wake_.wait_for(lock, stop, std::chrono::seconds(30), [] { return false; });
-            if (stop.stop_requested()) break;
-            const auto running = std::chrono::steady_clock::now() - since_;
-            if (step_.empty() || running < std::chrono::seconds(60)) continue;
-            const auto stats = engine_.snapshot().runtime;
-            std::cerr << "prefix_real stall " << step_ << " running "
-                      << std::chrono::duration_cast<std::chrono::seconds>(running).count()
-                      << " s: running " << stats.running_requests << " prefilling "
-                      << stats.prefilling_requests << " decode_ready " << stats.decode_ready_requests
-                      << " waiting " << stats.waiting_requests << " paused " << stats.paused_requests
-                      << " replaying " << stats.replaying_requests << " materializing "
-                      << stats.materializing_requests << " capture_pending "
-                      << stats.capture_pending_requests << " terminal_pending "
-                      << stats.terminal_pending_requests << " generated " << stats.generated_tokens
-                      << " prefill " << stats.computed_prefill_tokens << '\n';
-        }
-    }
-
-    const ninfer::Engine& engine_;
-    std::mutex mutex_;
-    std::condition_variable_any wake_;
-    std::string_view step_;
-    std::chrono::steady_clock::time_point since_;
-    std::jthread thread_;
-};
-
 const std::vector<std::string>& selected_steps() {
     static const std::vector<std::string> steps = [] {
         std::vector<std::string> result;
@@ -2366,6 +2454,7 @@ int main() {
         std::cout << "skip: NINFER_TEST_ARTIFACT is not set\n";
         return 77;
     }
+    install_stack_dumper(); // before any engine or CUDA thread exists
     // Fork-local (PR #15): reject an unknown prefill mode before any engine starts.
     try {
         (void)prefill_activations_under_test();
