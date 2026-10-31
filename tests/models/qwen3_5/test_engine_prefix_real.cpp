@@ -176,12 +176,13 @@ ninfer::PromptInput chinese_chat(bool enable_thinking) {
 }
 
 int exercise_artifact_frontend(const ninfer::Engine& engine) {
-    if (engine.count_tokens(chinese_chat(true)) != 16) {
-        std::cerr << "artifact tokenizer/chat template changed the thinking prompt golden\n";
-        return 1;
-    }
-    if (engine.count_tokens(chinese_chat(false)) != 18) {
-        std::cerr << "artifact tokenizer/chat template changed the no-thinking prompt golden\n";
+    // Fork-local (2cbe488d): Qwen3.6 artifacts render 16/18. The maintained Qwen3.8 template
+    // adds its default xhigh reasoning system block to the thinking prompt (58/18).
+    const std::uint32_t thinking    = engine.count_tokens(chinese_chat(true));
+    const std::uint32_t no_thinking = engine.count_tokens(chinese_chat(false));
+    if ((thinking != 16 && thinking != 58) || no_thinking != 18) {
+        std::cerr << "artifact tokenizer/chat template changed the prompt goldens: thinking="
+                  << thinking << " no_thinking=" << no_thinking << '\n';
         return 1;
     }
     return 0;
