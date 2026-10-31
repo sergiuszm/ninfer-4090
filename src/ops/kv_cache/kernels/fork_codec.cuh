@@ -13,6 +13,15 @@
 
 namespace ninfer::ops {
 
+namespace detail::kv {
+
+// Fork code planes in the record addressing of layout.cuh; FP16 G64 scales use Int8G64Layout.
+// INT4 and E8 lattice codes: two features per byte. E8 root codes: two bytes per eight features.
+using I4G64Layout     = QuantizedRowLayout<kHeadDim / 2, kInt8Groups, 2>;
+using E8RootG64Layout = QuantizedRowLayout<kHeadDim / 4, kInt8Groups, 4>;
+
+} // namespace detail::kv
+
 // Packed int4 codes of one 256-wide head row: 128 code bytes per row in the record addressing of
 // layout.cuh. `record` is the byte offset of the code plane, as for the upstream layouts.
 __device__ __forceinline__ std::int64_t kv_cache_i4_code_index(std::int64_t record, int kv_head,
