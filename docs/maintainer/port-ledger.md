@@ -281,7 +281,7 @@ changed since `d4929686`. The columns are the file status at `1882c6ad`, the ups
 disposition and the fork commits that changed the file. For a file that upstream deleted, the
 upstream column names the deleting commit and the upstream files that share the most identifiers
 with it, or the place that received the fork change. A disposition is a stage number with the
-feature ids of the plan, `carried <commit>`, `dissolved` with the reason, or `DROP`. Each stage
+feature ids of the plan, `done <commit>`, `dissolved` with the reason, or `DROP`. Each stage
 updates its rows when it lands.
 
 Finding for stage 2: K1 is not MECHANICAL as the remap says. The fork append kernel stores
@@ -296,6 +296,59 @@ to that path.
 Docs for later stages: fork edits to `README.md`, `docs/cli.md` and `docs/serving.md` wait for
 stage 6, where the flag set is final. `docs/rtx-3090-linux.md` and `docs/rtx-3090-windows.md` still
 name v1 and v2 artifacts. Refresh them at stage 7.
+
+Stage 0 (carry, 2026-10-07; re-homed onto `1882c6ad` 2026-10-31):
+
+| Item | Commits | Notes |
+|---|---|---|
+| B3 PDL off under `NINFER_SM86` | `34895f38` | `src/core/pdl.cuh` is unchanged upstream. Upstream's direct PDL users in `ops/mhc` are Spark-only |
+| B6 Docker compat libraries, `.gitignore` | `26a1722d` | The fork `models/` entry is `/scripts/models/`. Unanchored, it also matched upstream's `src/models/`, `tests/models/` and `bench/models/` and hid new files there |
+| B7 scripts, `VERSION` | `f9a339f1`, `c451a29b` | Downloads pin the v3 revisions: Qwen3.8-27B `1cbd84e7221e`, Qwen3.6-35B-A3B `ee4495803bc4`. Both hashes match the model cards at `1882c6ad`. The launchers pass `--kv-capacity`, `--lm-head-draft` and `--default-max-tokens`, which upstream's config schema removed: open for stage 4 |
+| K4 GDN gating projection | `70185719`, `fea50ce8` | Now `linear_attention/gated_delta_net/control/`. The sm_89 bounds apply to both 96x5120 tables; the norm table is the one the 27B prefill uses. The occupancy-sized cooperative launch is upstream now (dissolved). The test keeps T=2689 out, as before; the reason predates the pairwise unsplit sum |
+| K5 GDN recurrent | `18eb5592` | Now `kernels/transition.cuh` and `replay/{record,fold}_io.cuh` |
+| K1 E8 codecs and testbeds | `f45bf0da` | Headers in `kv_cache/kernels/`. Upstream dissolved the int8 group-64 codec header; the fork block is `kv_cache/kernels/fork_codec.cuh` on the new record addressing. See the finding above |
+| T3 bench drivers | `caf73a2d` | `--greedy`, `--max-new`, `--kv-capacity` and `--lm-head-draft` were removed upstream: open for stage 4 |
+| Fork-only docs | `4969435f` | Not carried: `docs/turn-checkpoint-ring.md` (retired feature and R4) |
+
+Stage 1 (build, 2026-10-07; re-homed onto `1882c6ad` 2026-10-31):
+
+| Item | Commits | Notes |
+|---|---|---|
+| B1 sm_89 pin, B2 global `NINFER_SM86` | `7067bdc7` | Upstream's target system (`cmake/NinferPlatform.cmake`): the fork keeps the `rtx5090` source set, pins its architecture to 89 and refuses `dgx_spark` |
+| B2 PTX guards | `ec84a8c5`, `a70d2374` | `__trap()` below sm_90 (mbarrier, TMA loads, the async-proxy fence, setmaxnreg) and below sm_100 (`cvt.e2m1x2`). Upstream's `common/cuda/pipeline.cuh` holds the mbarrier and TMA primitives. No file exclusions and no stubs |
+| B4 e4m3 MMA form | `dd6c04a7` | Plain e4m3 below sm_120. `mma_f16_f16acc` carried for K2 |
+| Block-scaled FP8 MMA | `ad0d27e4` | New upstream (`mma_fp8_e4m3_scaled`, real UE8M0 scales, no plain form). Traps below sm_120 |
+| BF16 TMA routes | `76a3c149` | On sm_89 the contiguous-weight TMA schedules run their tile geometry on the cp.async MMA kernel. Not tuned for sm_89 |
+| RDC shared scratch | `14d04c78` | The sm_89 device link of `ninfer_ops` put the shared scratch of `__device__` helpers after the largest relocatable shared buffer (48 KiB). `block_max_broadcast` gets internal linkage; the MoE grouping unit is built non-RDC |
+| Model startup and weight policies | `1e41cf70`, `805de6c1`, `b61a2af4` | Compute capability 8.9 required. nvfp4, k8v4 and fp8 KV refused. GLM5Next and Qwen4Exp refused. AllowA8 and AllowA4 weight uses bind as A16Only for every model (`models/common/bindings.cpp`) |
+| Op test gates | `94156970`, `9c6e9353` | One policy gate in `tests/ops/suite.cpp` (A8, A4) and one KV storage gate in `tests/kv_cache_storage.h` (nvfp4, k8v4, fp8). `409d7cb7` dissolved: the tags cover the batched cases, and the storage gate runs once per storage |
+| Bench roofline | `70b8cdb0` | RTX 4090 nominal references instead of the RTX 5090 ones |
+| B5 Windows (PR #10) | not done | As on `catchup4` |
+
+Decisions of the re-home (2026-10-31):
+
+- Build target: the fork keeps upstream's `rtx5090` source set with the architecture pinned to 89,
+  not a new target name. An audit of every target-conditioned C++/CUDA site found one wrong
+  selection for a 24 GB, 128-SM sm_89 card: the bench roofline (fixed in `70b8cdb0`).
+- fp8 KV is refused on sm_89 instead of emulating the block-scaled FP8 MMA. Production uses
+  `rk4v4-e8`. An emulation (plain e4m3 MMA, exact power-of-two scaling) is a possible follow-up.
+- GLM5Next and Qwen4Exp are refused on sm_89. This keeps sm_89 off the striped TMA mix path.
+- Build image: `1882c6ad` needs hwloc, liburing and libjpeg at configure time and `libcuda.so.1` at
+  link time. The desktop build uses an image derived from `ninfer-dev:runtime` with these packages
+  and upstream's stub link. The runtime image needs `libhwloc15`, `liburing2` and `libjpeg-turbo8`.
+
+Gates:
+
+- Full sm_89 build with tests, apps and benches: 1412 targets, 0 errors (clean build, 5 min 49 s at
+  -j16 on CPUs 8-15 and 24-31). After `14d04c78` no kernel exceeds the 48 KB static shared-memory limit of
+  sm_89. Warnings: 8 sites, all in upstream code (QSA `tail_extract.cu` narrowing, MoE
+  `block_scaled/shared.cu` unsigned compare, ignored `GrammarSession::masks` result in two tests).
+  The register counts of the GDN control MMA kernels match the residency budgets of `70185719`
+- GPU gate (ctest, server on the v3 artifact): pending. The `catchup4` VRAM finding (R12 required)
+  was measured on `81c8ce09`. Upstream now bounds Vision resources with `--vision-memory-budget`
+  (default 1 GiB), so the measurement must be repeated on `1882c6ad`.
+- Known open: `ninfer_moe_block_scaled_test` and `ninfer_moe_ep_test` have NVFP4 cases without a
+  policy tag; they reach the NVFP4 block-scale MMA, which traps on sm_89.
 
 ## Community triage 2026-10-07, round 4 (PR #14)
 

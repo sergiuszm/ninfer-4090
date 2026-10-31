@@ -1,8 +1,8 @@
 status	our_path	upstream	disposition	fork_commits
-modified-in-place	.gitignore	.gitignore	0 carried 26a1722d	09a93fd4
-modified-in-place	CMakeLists.txt	CMakeLists.txt; cmake/NinferPlatform.cmake (target system)	1 B1 done (rtx5090 source set pinned to sm_89, dgx_spark refused), B2 global NINFER_SM86 done; open: 1 B5 MSVC flags	cb2df08a 1eef8d83 0d2d4a5a 09a93fd4
-modified-in-place	Dockerfile	Dockerfile	0 carried 26a1722d	ff925039
-fork-new	VERSION	VERSION  [dir GONE upstream]	0 carried f9a339f1	7e59d987 e271cc83 09a93fd4
+modified-in-place	.gitignore	.gitignore	done 26a1722d	09a93fd4
+modified-in-place	CMakeLists.txt	CMakeLists.txt; cmake/NinferPlatform.cmake (target system)	done 7067bdc7; B1 done (rtx5090 source set pinned to sm_89, dgx_spark refused), B2 global NINFER_SM86 done; open: 1 B5 MSVC flags	cb2df08a 1eef8d83 0d2d4a5a 09a93fd4
+modified-in-place	Dockerfile	Dockerfile	done 26a1722d	ff925039
+fork-new	VERSION	VERSION  [dir GONE upstream]	done f9a339f1	7e59d987 e271cc83 09a93fd4
 modified-in-place	apps/cli/main.cpp	apps/cli/main.cpp	2 K1 E8 root, K1 E8, K1 rk4v4, K1 rk8v4; 4 R10, R12	77bca849 0c3d2bee 816fe3fe 5df406b0 5db12fac 7c2ce91e
 gone	apps/cli/options.cpp	deleted in 4126ecf4; candidates: src/product/config/options.cpp (8/15); tests/test_request_log.cpp (7/15); apps/cli/main.cpp (6/15)	2 K1 E8 root, K1 E8, K1 rk4v4, K1 rk8v4; 4 R12	0c3d2bee 816fe3fe 5df406b0 5db12fac 7c2ce91e
 gone	apps/cli/options.h	deleted in 4126ecf4; candidates: src/product/config/options.cpp (13/15); src/product/config/configuration.cpp (11/15); tests/test_request_log.cpp (10/15)	4 R12	0c3d2bee
@@ -22,34 +22,34 @@ modified-in-place	include/ninfer/ops/linear_add.h	include/ninfer/ops/linear_add.
 modified-in-place	include/ninfer/ops/linear_swiglu.h	include/ninfer/ops/linear_swiglu.h	3 PR15	7a507d1f
 modified-in-place	include/ninfer/ops/softmax_attention.h	include/ninfer/ops/softmax_attention.h	2 K2	ad51c40f(merge) 4da7dc8a(merge) 82f07c34(merge)
 modified-in-place	include/ninfer/types.h	include/ninfer/types.h	2 K1 E8 root, K1 E8, K1 rk4v4, K1 rk8v4; 3 PR15; 4 R10, R12; 6 PR14, S1; DROP R3 spill guard, R4, R9, R1e slots, R3 auto-save, turn ring, R2 digest, R1 slots	91829c35 1f7ee28f 03a99aa1 9f63c77b b98904d0 bf8c8d65 77bca849 8093c640 3a2e7f07 656b0df7 8e478945 beaeb70a 0c3d2bee 816fe3fe 5df406b0 5db12fac 7c2ce91e
-fork-new	scripts/check-linux-scripts.sh	scripts/check-linux-scripts.sh  [dir GONE upstream]	0 carried c451a29b	8febce7e 9b802a89
-fork-new	scripts/download-qwen36-35b-vision.bat	scripts/download-qwen36-35b-vision.bat  [dir GONE upstream]	0 carried c451a29b	8bdf1837
-fork-new	scripts/download-qwen36-35b-vision.sh	scripts/download-qwen36-35b-vision.sh  [dir GONE upstream]	0 carried c451a29b	9b802a89
-fork-new	scripts/download-qwen38.bat	scripts/download-qwen38.bat  [dir GONE upstream]	0 carried c451a29b	8febce7e 984e6b98
-fork-new	scripts/download-qwen38.sh	scripts/download-qwen38.sh  [dir GONE upstream]	0 carried c451a29b	8febce7e 9b802a89
-fork-new	scripts/package-release-v040.ps1	scripts/package-release-v040.ps1  [dir GONE upstream]	0 carried f9a339f1	09a93fd4
-fork-new	scripts/package-release-v040.sh	scripts/package-release-v040.sh  [dir GONE upstream]	0 carried f9a339f1	9b802a89
-fork-new	scripts/package-release-v050.ps1	scripts/package-release-v050.ps1  [dir GONE upstream]	0 carried f9a339f1	e271cc83
-fork-new	scripts/package-release-v050.sh	scripts/package-release-v050.sh  [dir GONE upstream]	0 carried f9a339f1	9b802a89
-fork-new	scripts/package-release-v060.ps1	scripts/package-release-v060.ps1  [dir GONE upstream]	0 carried f9a339f1	2ae51915 8bdf1837 984e6b98
-fork-new	scripts/package-release-v060.sh	scripts/package-release-v060.sh  [dir GONE upstream]	0 carried f9a339f1	9b802a89
-fork-new	scripts/run-qwen36-35b-vision.bat	scripts/run-qwen36-35b-vision.bat  [dir GONE upstream]	0 carried f9a339f1; open: 4 flags removed upstream (--kv-capacity, --lm-head-draft, --default-max-tokens)	8bdf1837
-fork-new	scripts/run-qwen36-35b-vision.sh	scripts/run-qwen36-35b-vision.sh  [dir GONE upstream]	0 carried f9a339f1; open: 4 flags removed upstream (--kv-capacity, --lm-head-draft, --default-max-tokens)	9b802a89
-fork-new	scripts/run-qwen38-c1.bat	scripts/run-qwen38-c1.bat  [dir GONE upstream]	0 carried f9a339f1; open: 4 flags removed upstream (--kv-capacity, --lm-head-draft, --default-max-tokens)	984e6b98
-fork-new	scripts/run-qwen38-c1.sh	scripts/run-qwen38-c1.sh  [dir GONE upstream]	0 carried f9a339f1; open: 4 flags removed upstream (--kv-capacity, --lm-head-draft, --default-max-tokens)	9b802a89
-fork-new	scripts/run-qwen38-c8.bat	scripts/run-qwen38-c8.bat  [dir GONE upstream]	0 carried f9a339f1; open: 4 flags removed upstream (--kv-capacity, --lm-head-draft, --default-max-tokens)	984e6b98
-fork-new	scripts/run-qwen38-c8.sh	scripts/run-qwen38-c8.sh  [dir GONE upstream]	0 carried f9a339f1; open: 4 flags removed upstream (--kv-capacity, --lm-head-draft, --default-max-tokens)	9b802a89
-fork-new	scripts/run-qwen38-vision.bat	scripts/run-qwen38-vision.bat  [dir GONE upstream]	0 carried f9a339f1; open: 4 flags removed upstream (--kv-capacity, --lm-head-draft, --default-max-tokens)	2ae51915
-fork-new	scripts/run-qwen38-vision.sh	scripts/run-qwen38-vision.sh  [dir GONE upstream]	0 carried f9a339f1; open: 4 flags removed upstream (--kv-capacity, --lm-head-draft, --default-max-tokens)	9b802a89
-modified-in-place	src/CMakeLists.txt	src/CMakeLists.txt	B2 by device guards (no exclusions; mbarrier and TMA in ops/common/cuda/pipeline.cuh); open: 1 B5, 3 PR15 sources, 6 S1	7a507d1f 4277f14b 1eef8d83 09a93fd4
-modified-in-place	src/artifact/binder.cpp	src/artifact/binder.cpp	1 B2/B5 3090 base	09a93fd4
-modified-in-place	src/artifact/binder.h	src/artifact/binder.h	1 B2/B5 3090 base	09a93fd4
-modified-in-place	src/artifact/reader.cpp	src/artifact/reader.cpp	1 B2/B5 3090 base	09a93fd4
+fork-new	scripts/check-linux-scripts.sh	scripts/check-linux-scripts.sh  [dir GONE upstream]	done c451a29b	8febce7e 9b802a89
+fork-new	scripts/download-qwen36-35b-vision.bat	scripts/download-qwen36-35b-vision.bat  [dir GONE upstream]	done c451a29b	8bdf1837
+fork-new	scripts/download-qwen36-35b-vision.sh	scripts/download-qwen36-35b-vision.sh  [dir GONE upstream]	done c451a29b	9b802a89
+fork-new	scripts/download-qwen38.bat	scripts/download-qwen38.bat  [dir GONE upstream]	done c451a29b	8febce7e 984e6b98
+fork-new	scripts/download-qwen38.sh	scripts/download-qwen38.sh  [dir GONE upstream]	done c451a29b	8febce7e 9b802a89
+fork-new	scripts/package-release-v040.ps1	scripts/package-release-v040.ps1  [dir GONE upstream]	done f9a339f1	09a93fd4
+fork-new	scripts/package-release-v040.sh	scripts/package-release-v040.sh  [dir GONE upstream]	done f9a339f1	9b802a89
+fork-new	scripts/package-release-v050.ps1	scripts/package-release-v050.ps1  [dir GONE upstream]	done f9a339f1	e271cc83
+fork-new	scripts/package-release-v050.sh	scripts/package-release-v050.sh  [dir GONE upstream]	done f9a339f1	9b802a89
+fork-new	scripts/package-release-v060.ps1	scripts/package-release-v060.ps1  [dir GONE upstream]	done f9a339f1	2ae51915 8bdf1837 984e6b98
+fork-new	scripts/package-release-v060.sh	scripts/package-release-v060.sh  [dir GONE upstream]	done f9a339f1	9b802a89
+fork-new	scripts/run-qwen36-35b-vision.bat	scripts/run-qwen36-35b-vision.bat  [dir GONE upstream]	done f9a339f1; open: 4 flags removed upstream (--kv-capacity, --lm-head-draft, --default-max-tokens)	8bdf1837
+fork-new	scripts/run-qwen36-35b-vision.sh	scripts/run-qwen36-35b-vision.sh  [dir GONE upstream]	done f9a339f1; open: 4 flags removed upstream (--kv-capacity, --lm-head-draft, --default-max-tokens)	9b802a89
+fork-new	scripts/run-qwen38-c1.bat	scripts/run-qwen38-c1.bat  [dir GONE upstream]	done f9a339f1; open: 4 flags removed upstream (--kv-capacity, --lm-head-draft, --default-max-tokens)	984e6b98
+fork-new	scripts/run-qwen38-c1.sh	scripts/run-qwen38-c1.sh  [dir GONE upstream]	done f9a339f1; open: 4 flags removed upstream (--kv-capacity, --lm-head-draft, --default-max-tokens)	9b802a89
+fork-new	scripts/run-qwen38-c8.bat	scripts/run-qwen38-c8.bat  [dir GONE upstream]	done f9a339f1; open: 4 flags removed upstream (--kv-capacity, --lm-head-draft, --default-max-tokens)	984e6b98
+fork-new	scripts/run-qwen38-c8.sh	scripts/run-qwen38-c8.sh  [dir GONE upstream]	done f9a339f1; open: 4 flags removed upstream (--kv-capacity, --lm-head-draft, --default-max-tokens)	9b802a89
+fork-new	scripts/run-qwen38-vision.bat	scripts/run-qwen38-vision.bat  [dir GONE upstream]	done f9a339f1; open: 4 flags removed upstream (--kv-capacity, --lm-head-draft, --default-max-tokens)	2ae51915
+fork-new	scripts/run-qwen38-vision.sh	scripts/run-qwen38-vision.sh  [dir GONE upstream]	done f9a339f1; open: 4 flags removed upstream (--kv-capacity, --lm-head-draft, --default-max-tokens)	9b802a89
+modified-in-place	src/CMakeLists.txt	src/CMakeLists.txt	B2 by device guards (no exclusions): ec84a8c5, a70d2374; open: 1 B5, 3 PR15 sources, 6 S1	7a507d1f 4277f14b 1eef8d83 09a93fd4
+modified-in-place	src/artifact/binder.cpp	src/artifact/binder.cpp	1 review with the 35B bindings (has_object for the optional DFlash binds)	09a93fd4
+modified-in-place	src/artifact/binder.h	src/artifact/binder.h	1 review with the 35B bindings (has_object for the optional DFlash binds)	09a93fd4
+modified-in-place	src/artifact/reader.cpp	src/artifact/reader.cpp	1 B5 (Windows mmap; upstream moved file I/O to artifact/backing.cpp, 8cea711b)	09a93fd4
 modified-in-place	src/core/linear_attention_state.h	src/core/linear_attention_state.h	4 R10 (optional)	77bca849
 modified-in-place	src/core/paged_kv_cache.cpp	src/core/paged_kv_cache.cpp	DROP R1e slots	bf8c8d65
 modified-in-place	src/core/paged_kv_cache.h	src/core/paged_kv_cache.h	2 K1 E8 root, K1 E8, K1 rk4v4, K1 rk8v4; DROP R1e slots, R1 slots	bf8c8d65 beaeb70a 816fe3fe 5df406b0 5db12fac 7c2ce91e
 modified-in-place	src/core/paged_kv_storage.h	src/core/paged_kv_storage.h	2 K1	4da7dc8a(merge)
-untouched-upstream	src/core/pdl.cuh	src/core/pdl.cuh	0 carried 34895f38	09a93fd4
+untouched-upstream	src/core/pdl.cuh	src/core/pdl.cuh	done 34895f38	09a93fd4
 fork-new	src/ops/attn_input_proj/q4_q5/q4_q5_attn_input_int8.cu	src/ops/attn_input_proj/q4_q5/q4_q5_attn_input_int8.cu  [dir GONE upstream]	3 PR15	1f7ee28f 7a507d1f
 gone	src/ops/attn_input_proj/q4_q5/q4_q5_attn_input_kernels.h	deleted in 4eb2c042; candidates: src/ops/linear/split/q4_q5/shapes/n7168_n7168_k5120/small.cu (2/8); src/ops/linear/split/q4_q5/shapes/n7168_n7168_k5120/mma.cu (2/8); bench/ops/candidate_selector_bench.cu (1/8)	3 PR15	7a507d1f
 gone	src/ops/attn_input_proj/q4_q5/q4_q5_attn_input_plan.cpp	deleted in 4eb2c042; candidates: src/ops/linear/split/q4_q5/shapes/n7168_n7168_k5120/small.cu (3/15); src/ops/linear/split/q4_q5/shapes/n7168_n7168_k5120/mma.cu (3/15); bench/ops/candidate_selector_bench.cu (1/15)	3 PR15	7a507d1f
@@ -60,20 +60,20 @@ fork-new	src/ops/common/int8_mma.cuh	src/ops/common/int8_mma.cuh	3 PR15	1f7ee28f
 fork-new	src/ops/common/int8_proj_launch.cu	src/ops/common/int8_proj_launch.cu	3 PR15	1f7ee28f 7a507d1f
 fork-new	src/ops/common/int8_proj_launch.h	src/ops/common/int8_proj_launch.h	3 PR15	1f7ee28f 7a507d1f
 fork-new	src/ops/common/int8_rowsplit_gemm.cuh	src/ops/common/int8_rowsplit_gemm.cuh	3 PR15	1f7ee28f 7a507d1f
-gone	src/ops/common/mma.cuh	src/ops/common/cuda/mma.cuh (ae54c1a9)	1 B4 done (plain e4m3 below sm_120, mma_f16_f16acc carried); open: 2 K2 i8 retune (ce50e995)	ce50e995
+gone	src/ops/common/mma.cuh	src/ops/common/cuda/mma.cuh (ae54c1a9)	done dd6c04a7, ad0d27e4; B4 done (plain e4m3 below sm_120, scaled form traps, mma_f16_f16acc carried); open: 2 K2 i8 retune (ce50e995)	ce50e995
 gone	src/ops/dynamic_grouped_conv/w8/w8_dynamic_grouped_conv_add_materialized.cu	deleted in 1844d861; candidates: src/ops/dynamic_grouped_conv/add/launch.cu (9/15); src/ops/linear/pair/q8/shapes/n1024_k2048.cu (4/15); src/ops/linear/swiglu/q8/shapes/n34816_k5120.cu (4/15)	DROP K3; stage 1 build checks the 48 KB static smem cap on the Q8 successor	87189c68
-gone	src/ops/gdn_gating_proj/bf16/bf16_gdn_gating_proj_gemm_mma.cuh	src/ops/linear_attention/gated_delta_net/control/kernels/mma.cuh (f7d3090b)	0 carried 70185719	5d57fed9
+gone	src/ops/gdn_gating_proj/bf16/bf16_gdn_gating_proj_gemm_mma.cuh	src/ops/linear_attention/gated_delta_net/control/kernels/mma.cuh (f7d3090b)	done 70185719	5d57fed9
 gone	src/ops/gdn_gating_proj/bf16/bf16_gdn_gating_proj_kernels.cu	src/ops/linear_attention/gated_delta_net/control/kernels/mma_launch.cuh (f7d3090b)	0 dissolved: upstream residency() sizes cooperative chunks by occupancy (Full and Predicated)	8adf1797 1f7ee28f 7a507d1f
-gone	src/ops/gdn_gating_proj/bf16/bf16_gdn_gating_proj_plan.cpp	src/ops/linear_attention/gated_delta_net/control/plan.cpp (f7d3090b)	0 carried 70185719 (both 96x5120 tables)	8f3e943c a3cb1abc
+gone	src/ops/gdn_gating_proj/bf16/bf16_gdn_gating_proj_plan.cpp	src/ops/linear_attention/gated_delta_net/control/plan.cpp (f7d3090b)	done 70185719 (both 96x5120 tables)	8f3e943c a3cb1abc
 fork-new	src/ops/gdn_input_proj/q4_q5/q4_q5_gdn_input_int8.cu	src/ops/gdn_input_proj/q4_q5/q4_q5_gdn_input_int8.cu  [dir GONE upstream]	3 PR15	1f7ee28f 7a507d1f
 gone	src/ops/gdn_input_proj/q4_q5/q4_q5_gdn_input_kernels.h	deleted in f2620157; candidates: tests/ops/linear_attention/gated_delta_net/input_conv/snapshot.cpp (5/9); tests/ops/linear_attention/causal_conv1d_silu.cpp (4/9); src/ops/linear_attention/gated_delta_net/input_conv/q4_q5/launch.h (3/9)	3 PR15	7a507d1f
 gone	src/ops/gdn_input_proj/q4_q5/q4_q5_gdn_input_plan.cpp	deleted in f2620157; candidates: src/ops/linear_attention/gated_delta_net/input_conv/q4_q5/projection.cpp (2/15); src/ops/linear_attention/gated_delta_net/input_conv/q4_q5/projection_mma.cu (2/15); src/ops/linear_attention/gated_delta_net/input_conv/q4_q5/launch.h (2/15)	3 PR15	7a507d1f
 gone	src/ops/gdn_input_proj/q4_q5/q4_q5_gdn_input_plan.h	deleted in f2620157; candidates: src/ops/linear_attention/gated_delta_net/input_conv/q4_q5/launch.h (3/15); src/ops/linear_attention/gated_delta_net/input_conv/q4_q5/projection.cpp (2/15); src/ops/linear_attention/gated_delta_net/input_conv/q4_q5/projection_mma.cu (2/15)	3 PR15	7a507d1f
-fork-new	src/ops/kernel/e8_lattice.cuh	src/ops/kv_cache/kernels/e8_lattice.cuh	0 carried f45bf0da	5df406b0
-fork-new	src/ops/kernel/e8_root_codec.cuh	src/ops/kv_cache/kernels/e8_root_codec.cuh	0 carried f45bf0da	a0e03d37 bc569eb8 c3a6e5c4 816fe3fe
+fork-new	src/ops/kernel/e8_lattice.cuh	src/ops/kv_cache/kernels/e8_lattice.cuh	done f45bf0da	5df406b0
+fork-new	src/ops/kernel/e8_root_codec.cuh	src/ops/kv_cache/kernels/e8_root_codec.cuh	done f45bf0da	a0e03d37 bc569eb8 c3a6e5c4 816fe3fe
 gone	src/ops/kv_cache/append/kernel.cuh	deleted in 6733be72; candidates: src/ops/kv_cache/append/prefix.cuh (6/15); src/ops/kv_cache/kernels/write/int8.cuh (6/15); src/ops/kv_cache/kernels/write/fp8.cuh (5/15)	2 K1 (separate fork append path, keep upstream Int8Group64)	ad51c40f(merge) 4da7dc8a(merge) 82f07c34(merge)
 gone	src/ops/kv_cache/append/launch.cu	deleted in 6733be72; candidates: src/ops/softmax_attention/qsa/prepare/launch.cu (5/15); src/ops/softmax_attention/kernels/causal/nvfp4/grouped_mma.cuh (5/15); src/ops/softmax_attention/kernels/causal/k8v4/grouped_mma.cuh (5/15)	2 K1 (separate fork append path, keep upstream Int8Group64)	ad51c40f(merge) 4da7dc8a(merge) 82f07c34(merge)
-gone	src/ops/kv_cache/int8_g64_codec.cuh	src/ops/kv_cache/kernels/fork_codec.cuh (fork block; 6733be72 dissolved the file into kernels/layout.cuh)	0 carried f45bf0da	82f07c34(merge)
+gone	src/ops/kv_cache/int8_g64_codec.cuh	src/ops/kv_cache/kernels/fork_codec.cuh (fork block; 6733be72 dissolved the file into kernels/layout.cuh)	done f45bf0da	82f07c34(merge)
 gone	src/ops/linear/w8/w8_config.h	gone before 81c8ce09; candidates: src/ops/linear/kernels/nvfp4/nvfp4_schedule.cuh (8/15); src/ops/linear/kernels/fp8/fp8_schedule.cuh (7/15); src/ops/linear/kernels/q8/q8_schedule.cuh (7/15)	DROP K3 (W8 -> Q8 upstream; gate: Q8 op tests on sm_89)	09a93fd4
 gone	src/ops/linear/w8/w8_rowsplit_gemm_mma.cuh	gone before 81c8ce09; candidates: src/ops/linear/add/q8/epilogue.cuh (9/15); src/ops/linear/pair/q8/dual_mma.cuh (7/15); src/ops/linear/kernels/q8/q8_a16_mma.cuh (7/15)	DROP K3; stage 1 build checks the 48 KB static smem cap on the Q8 successor	87189c68
 gone	src/ops/linear/w8/w8_rowsplit_gemm_splitk.cu	gone before 81c8ce09; candidates: src/ops/linear/pair/q8/shapes/n1024_k2048.cu (5/15); src/ops/linear_attention/gated_delta_net/input_conv/q8/sliced_k.cu (5/15); src/ops/linear/swiglu/q8/shapes/n12288_k2048.cu (4/15)	DROP K3 (W8 -> Q8 upstream; gate: Q8 op tests on sm_89)	09a93fd4
@@ -83,7 +83,7 @@ gone	src/ops/linear_add/q5/q5_linear_add_kernels.h	deleted in d53eb7ae; candidat
 gone	src/ops/linear_add/q5/q5_linear_add_plan.cpp	deleted in d53eb7ae; candidates: include/ninfer/ops/residual_add_rmsnorm.h (1/15); src/ops/normalization/rmsnorm/residual_add.cpp (1/15); tests/ops/linear/add/runner.cpp (1/15)	3 PR15	7a507d1f
 gone	src/ops/linear_add/q5/q5_linear_add_plan.h	deleted in d53eb7ae; candidates: bench/ops/candidate_selector_bench.cu (2/15); bench/ops/linear_attention/gated_delta_net/recurrence.cu (2/15); bench/ops/q8_linear_swiglu_bench.cu (2/15)	3 PR15	7a507d1f
 gone	src/ops/linear_add/w8/w8_linear_add_gemm_splitk.cu	deleted in d53eb7ae; candidates: src/ops/linear_attention/gated_delta_net/input_conv/q8/sliced_k.cu (6/15); src/ops/linear/pair/q8/shapes/n1024_k2048.cu (4/15); src/ops/linear/swiglu/q8/shapes/n12288_k2048.cu (4/15)	DROP K3 (W8 -> Q8 upstream; the 68e2d0be T=1 tail site is gone; gate: Q8 op tests on sm_89)	68e2d0be 09a93fd4
-gone	src/ops/linear_attention/gated_delta_net/recurrent.cuh	src/ops/linear_attention/gated_delta_net/kernels/transition.cuh, src/ops/linear_attention/gated_delta_net/replay/record_io.cuh, src/ops/linear_attention/gated_delta_net/replay/fold_io.cuh (f2620157)	0 carried 18eb5592	c4d09b61 6e239351
+gone	src/ops/linear_attention/gated_delta_net/recurrent.cuh	src/ops/linear_attention/gated_delta_net/kernels/transition.cuh, src/ops/linear_attention/gated_delta_net/replay/record_io.cuh, src/ops/linear_attention/gated_delta_net/replay/fold_io.cuh (f2620157)	done 18eb5592	c4d09b61 6e239351
 gone	src/ops/linear_pair/w8/w8_pair_gemm_splitk.cu	deleted in d53eb7ae; candidates: src/ops/linear/pair/q8/shapes/n1024_k2048.cu (10/15); src/ops/linear/pair/q8/shapes/n1024_k5120.cu (5/15); src/ops/elementwise/add_bias.cu (5/15)	DROP K3 (W8 -> Q8 upstream; gate: Q8 op tests on sm_89)	09a93fd4
 gone	src/ops/linear_swiglu/q4/q4_linear_swiglu_gemm_mma.cu	deleted in d53eb7ae; candidates: src/ops/linear/swiglu/q4/shapes/n34816_k5120/mma.cu (9/15); src/ops/linear/split/q4_q5/shapes/n7168_n7168_k5120/mma.cu (4/15); src/ops/linear_attention/gated_delta_net/input_conv/q4_q5/projection_mma.cu (4/15)	2 K6	fd3f5d80
 fork-new	src/ops/linear_swiglu/q4/q4_linear_swiglu_int8.cu	src/ops/linear_swiglu/q4/q4_linear_swiglu_int8.cu  [dir GONE upstream]	3 PR15	1f7ee28f 7a507d1f
@@ -92,7 +92,7 @@ gone	src/ops/linear_swiglu/q4/q4_linear_swiglu_kernels.h	deleted in d53eb7ae; ca
 gone	src/ops/linear_swiglu/q4/q4_linear_swiglu_plan.cpp	deleted in d53eb7ae; candidates: bench/ops/q8_linear_swiglu_bench.cu (4/15); bench/ops/linear_swiglu_clamped.cu (3/15); src/ops/linear/swiglu/linear_swiglu.cpp (3/15)	3 PR15	7a507d1f
 gone	src/ops/linear_swiglu/q4/q4_linear_swiglu_plan.h	deleted in d53eb7ae; candidates: bench/ops/q8_linear_swiglu_bench.cu (3/15); tests/ops/linear/swiglu/runner.cpp (2/15); src/ops/linear/swiglu/linear_swiglu.cpp (2/15)	3 PR15	7a507d1f
 gone	src/ops/linear_swiglu/w8/w8_linear_swiglu_gemm_mma.cu	gone before 81c8ce09; candidates: src/ops/linear/swiglu/q4/shapes/n34816_k5120/mma.cu (4/15); src/ops/linear/pair/q8/shapes/n1024_k5120.cu (4/15); src/ops/linear/swiglu/q4/shapes/n34816_k5120/small.cu (4/15)	DROP K3; stage 1 build checks the 48 KB static smem cap on the Q8 successor	87189c68
-fork-new	src/ops/nvfp4_sm86_stubs.cpp	src/ops/nvfp4_sm86_stubs.cpp	1 B2 (host refusals)	09a93fd4
+fork-new	src/ops/nvfp4_sm86_stubs.cpp	src/ops/nvfp4_sm86_stubs.cpp	DROP: replaced by device guards + host routing (stage 1)	09a93fd4
 modified-in-place	src/ops/softmax_attention/dense/causal_cache/causal_softmax_attention.cpp	src/ops/softmax_attention/dense/causal_cache/causal_softmax_attention.cpp	2 K2 (3 dispatch branches)	ad51c40f(merge) 4da7dc8a(merge) 82f07c34(merge)
 gone	src/ops/softmax_attention/dense/causal_cache/prompt.cu	gone before 81c8ce09; candidates: src/ops/softmax_attention/dense/causal_cache/k8v4/launch.cu (5/15); src/ops/softmax_attention/dense/causal_cache/fp8/launch.cu (5/15); src/ops/softmax_attention/dense/causal_cache/int8/launch.cu (5/15)	2 K2 (int8 parts to causal_cache/e8/)	4da7dc8a(merge) 82f07c34(merge)
 gone	src/ops/softmax_attention/dense/causal_cache/prompt_common.cuh	gone before 81c8ce09; candidates: src/ops/softmax_attention/kpool_mla/sparse_mla/attention.cuh (4/15); src/ops/linear/kernels/q4/q4_a16_tma_prefetch.cuh (3/15); src/ops/linear/kernels/q8/q8_a16_tma.cuh (3/15)	2 K2 (move to causal_cache/e8/)	4da7dc8a(merge) 82f07c34(merge)
@@ -142,10 +142,10 @@ gone	src/targets/qwen3_6/impl/frontend/processor.cpp	deleted in 9cfd5646; candid
 gone	src/targets/qwen3_6/impl/frontend/processor.h	deleted in 9cfd5646; candidates: src/models/common/qwen/frontend/processor.h (14/15); src/models/common/qwen/frontend/processor.cpp (13/15); src/models/common/qwen/frontend/frontend.cpp (10/15)	4 R12	328d9aa8
 gone	src/targets/qwen3_6/impl/frontend/tool_call_parser.cpp	deleted in 9cfd5646; candidates: src/models/common/qwen/frontend/tool_call_parser.cpp (8/15); src/models/glm5next/frontend/tool_decoder.cpp (2/15); include/ninfer/types.h (1/15)	6 PR14	6d88143b 724d0333 7d9d8b0a 91829c35
 gone	src/targets/qwen3_6/impl/frontend/tool_call_parser.h	gone before 81c8ce09; candidates: src/models/common/qwen/frontend/tool_call_parser.cpp (10/15); src/models/common/qwen/frontend/tool_call_parser.h (8/15); src/models/glm5next/frontend/tool_decoder.cpp (6/15)	6 PR14	724d0333 91829c35
-gone	src/targets/qwen3_6/impl/runtime/api_impl.h	gone before 81c8ce09; candidates: src/models/qwen3_5/runtime_types.h (4/15); src/models/glm5next/runtime_types.h (3/15); src/models/qwen4_exp/runtime_types.h (3/15)	1 B2/B5 3090 base; DROP R1e slots, turn ring, R2 digest, R1 slots	bf8c8d65 3a2e7f07 8e478945 beaeb70a 09a93fd4
+gone	src/targets/qwen3_6/impl/runtime/api_impl.h	gone before 81c8ce09; candidates: src/models/qwen3_5/runtime_types.h (4/15); src/models/glm5next/runtime_types.h (3/15); src/models/qwen4_exp/runtime_types.h (3/15)	1 B5 (explicit move members for MSVC); DROP R1e slots, turn ring, R2 digest, R1 slots	bf8c8d65 3a2e7f07 8e478945 beaeb70a 09a93fd4
 gone	src/targets/qwen3_6/impl/runtime/instantiate.h	gone before 81c8ce09; candidates: src/models/qwen3_5/program/resources.h (1/14); src/models/qwen3_5/execution/workspace.h (1/14); src/models/qwen3_5/execution/draft.cpp (1/14)	DROP R1 slots	beaeb70a
 gone	src/targets/qwen3_6/impl/runtime/layouts.h	gone before 81c8ce09; candidates: src/models/qwen3_5/program/planning/startup.h (5/15); src/models/qwen3_5/planning.h (5/15); src/models/qwen3_5/program/planning/startup.cpp (4/15)	2 K1 E8 root, K1 E8, K1 rk4v4, K1 rk8v4; DROP turn ring	3a2e7f07 816fe3fe 5df406b0 5db12fac 7c2ce91e
-gone	src/targets/qwen3_6/impl/runtime/layouts_impl.h	gone before 81c8ce09; candidates: src/models/qwen3_5/program/planning/startup.cpp (10/15); src/models/qwen3_5/planning.cpp (7/15); src/models/qwen3_5/session/request.cpp (6/15)	B1/B2 sm + KV checks done (models/qwen3_5/program/planning/startup.cpp); open: 2 K1, 4 R12, R13; DROP turn ring	3a2e7f07 0c3d2bee 816fe3fe 5df406b0 5db12fac 7c2ce91e 1eef8d83 e733d039 09a93fd4
+gone	src/targets/qwen3_6/impl/runtime/layouts_impl.h	gone before 81c8ce09; candidates: src/models/qwen3_5/program/planning/startup.cpp (10/15); src/models/qwen3_5/planning.cpp (7/15); src/models/qwen3_5/session/request.cpp (6/15)	B1/B2 sm + KV checks done 1e41cf70, 805de6c1 (models/qwen3_5/program/planning/startup.cpp); open: 2 K1, 4 R12, R13; DROP turn ring	3a2e7f07 0c3d2bee 816fe3fe 5df406b0 5db12fac 7c2ce91e 1eef8d83 e733d039 09a93fd4
 gone	src/targets/qwen3_6/impl/runtime/logical_kv_store.h	gone before 81c8ce09; candidates: src/models/common/context/directory/pages.cpp (3/15); src/models/common/context/directory/pages.h (3/15); src/models/qwen3_5/session/reclaim.cpp (2/15)	DROP R8	e565fe50
 gone	src/targets/qwen3_6/impl/runtime/prefix_identity.cpp	deleted in 9cfd5646; candidates: src/models/common/qwen/prefix_identity.cpp (15/15); src/models/qwen3_5/session/request.cpp (7/15); src/models/common/qwen/prefix_identity.h (6/15)	DROP R1e slots, R1 slots	bf8c8d65 beaeb70a
 gone	src/targets/qwen3_6/impl/runtime/prefix_identity.h	deleted in 9cfd5646; candidates: src/models/common/qwen/prefix_identity.h (14/14); src/models/common/qwen/prefix_identity.cpp (12/14); tests/models/qwen3_5/test_runtime_mechanisms.cpp (6/14)	DROP R1e slots, R1 slots	bf8c8d65 beaeb70a
@@ -155,33 +155,33 @@ gone	src/targets/qwen3_6/impl/runtime/request_plan_impl.h	gone before 81c8ce09; 
 fork-new	src/targets/qwen3_6/impl/runtime/session_snapshot_impl.h	src/targets/qwen3_6/impl/runtime/session_snapshot_impl.h  [dir GONE upstream]	DROP R1 slots (incl. the 7b134d2a S3 hunk)	7b134d2a edac7921 bf8c8d65 3a2e7f07 8e478945 beaeb70a
 gone	src/targets/qwen3_6/impl/runtime/state_image_store.h	deleted in 9cfd5646; candidates: src/models/common/context/directory/state.cpp (9/15); src/models/common/context/directory/state.h (7/15); tests/models/common/context/test_store.cpp (5/15)	DROP R1 slots, R1e slots	edac7921 bf8c8d65
 gone	src/targets/qwen3_6_27b/impl/config.h	gone before 81c8ce09; candidates: src/models/qwen3_5/load/text.cpp (2/15); tests/models/glm5next/test_loading.cpp (2/15); src/ops/moe/kernels/cuda/groupwise_int/grouped_down.cuh (2/15)	DROP K7	ec56f922
-gone	src/targets/qwen3_6_27b/impl/package.cpp	gone before 81c8ce09; candidates: include/ninfer/types.h (7/15); src/serve/request_log.cpp (7/15); tests/test_request_log.cpp (6/15)	B2 sm check done (models/qwen3_5/program/planning/startup.cpp); open: 3 PR15, 4 R12	1f7ee28f 73b42127 785d856b
-gone	src/targets/qwen3_6_27b/impl/variant.cpp	gone before 81c8ce09; candidates: src/models/qwen3_5/program/planning/startup.cpp (3/15); tests/ops/linear/add/cases_bank.cpp (3/15); tests/ops/moe/test_swiglu.cpp (3/15)	B2 NVFP4 and FP8 A16 rule done (models/common/bindings.cpp, all models); open: 3 PR15	1f7ee28f 7a507d1f 785d856b 09a93fd4
+gone	src/targets/qwen3_6_27b/impl/package.cpp	gone before 81c8ce09; candidates: include/ninfer/types.h (7/15); src/serve/request_log.cpp (7/15); tests/test_request_log.cpp (6/15)	B2 sm check done 1e41cf70 (models/qwen3_5/program/planning/startup.cpp); open: 3 PR15, 4 R12	1f7ee28f 73b42127 785d856b
+gone	src/targets/qwen3_6_27b/impl/variant.cpp	gone before 81c8ce09; candidates: src/models/qwen3_5/program/planning/startup.cpp (3/15); tests/ops/linear/add/cases_bank.cpp (3/15); tests/ops/moe/test_swiglu.cpp (3/15)	B2 NVFP4 and FP8 A16 rule done 1e41cf70 (models/common/bindings.cpp, all models); open: 3 PR15	1f7ee28f 7a507d1f 785d856b 09a93fd4
 gone	src/targets/qwen3_6_27b/impl/variant.h	gone before 81c8ce09; candidates: src/models/common/qwen/vision/parameters.cpp (2/15); src/models/glm5next/load/vision.cpp (2/15); src/models/glm5next/load/bindings.h (2/15)	3 PR15	1f7ee28f
 gone	src/targets/qwen3_6_35b_a3b/impl/config.h	gone before 81c8ce09; candidates: src/models/qwen3_5/load/text.cpp (2/15); tests/models/glm5next/test_loading.cpp (2/15); src/ops/moe/kernels/cuda/groupwise_int/grouped_down.cuh (2/15)	DROP K7	ec56f922
 gone	src/targets/qwen3_6_35b_a3b/impl/load/bindings.cpp	gone before 81c8ce09; candidates: tools/upgrade_ninfer_v2_to_v3.py (6/15); src/models/qwen3_5/execution/draft.cpp (3/15); src/models/qwen3_5/execution/parameters.cpp (3/15)	1 review (3090 base dropped 35B DFlash binds; 35B untested on 4090)	09a93fd4
 gone	src/targets/qwen3_6_35b_a3b/impl/package.cpp	gone before 81c8ce09; candidates: src/models/glm5next/startup.cpp (6/15); tests/models/qwen3_5/test_native_transactions.cpp (6/15); include/ninfer/types.h (6/15)	4 R12	73b42127
 modified-in-place	tests/CMakeLists.txt	tests/CMakeLists.txt	1 B5 u128; 2 K1 test, K1 E8; 3 PR15; 6 S1; DROP R3 spill guard, R1 slots	7a507d1f b8c71f00 03a99aa1 981b685e 94830b3f beaeb70a 5df406b0 4277f14b
-gone	tests/ops/linear/test_nvfp4_a4.cpp	tests/ops/linear/projection/cases_nvfp4.cpp (91972187); gate in tests/ops/suite.cpp	done stage 1 (policy gate)	25c782aa
+gone	tests/ops/linear/test_nvfp4_a4.cpp	tests/ops/linear/projection/cases_nvfp4.cpp (91972187); gate in tests/ops/suite.cpp	done 94156970 (policy gate)	25c782aa
 gone	tests/ops/linear_add/linear_add_test_common.cpp	deleted in 91972187; candidates: tests/ops/linear/add/runner.cpp (13/15); tests/ops/linear/projection/runner.cpp (11/15); tests/ops/linear/pair/test.cpp (8/15)	3 PR15	3410775b 7a507d1f
 gone	tests/ops/linear_add/linear_add_test_common.h	deleted in 91972187; candidates: tests/ops/linear/add/cases_bf16.cpp (2/4); tests/ops/linear/add/cases_q4.cpp (2/4); tests/ops/linear/pair/test.cpp (2/4)	3 PR15	7a507d1f
 gone	tests/ops/linear_add/test_bf16_a16.cpp	deleted in 91972187; candidates: tests/ops/linear/add/cases_bf16.cpp (9/13); tests/ops/linear/projection/cases_fp8.cpp (3/13); tests/ops/reduction/target_logprobs.cpp (3/13)	3 PR15	7a507d1f
-gone	tests/ops/linear_add/test_nvfp4.cpp	tests/ops/linear/add/cases_nvfp4.cpp (91972187); gate in tests/ops/suite.cpp	done stage 1 (policy gate)	25c782aa
+gone	tests/ops/linear_add/test_nvfp4.cpp	tests/ops/linear/add/cases_nvfp4.cpp (91972187); gate in tests/ops/suite.cpp	done 94156970 (policy gate)	25c782aa
 gone	tests/ops/linear_add/test_q5_a16.cpp	deleted in 91972187; candidates: tests/ops/linear/add/cases_q8.cpp (2/8); tests/ops/linear/projection/cases_q5.cpp (1/8); tests/ops/linear/add/cases_q5.cpp (1/8)	3 PR15	7a507d1f
 fork-new	tests/ops/linear_add/test_q5_a8.cpp	tests/ops/linear_add/test_q5_a8.cpp  [dir GONE upstream]	3 PR15	7a507d1f
 gone	tests/ops/linear_add/test_w8_a16.cpp	gone before 81c8ce09; candidates: tests/ops/linear/add/cases_q8.cpp (4/8)	3 PR15 (ActivationCompute arg on upstream test_q8_a16.cpp if the common signature changes)	7a507d1f
 gone	tests/ops/linear_swiglu/linear_swiglu_test_common.cpp	deleted in 91972187; candidates: tests/ops/linear/swiglu/runner.cpp (12/15); tests/ops/linear/add/runner.cpp (7/15); tests/ops/linear/projection/runner.cpp (6/15)	3 PR15	7a507d1f
-gone	tests/ops/linear_swiglu/test_nvfp4.cpp	tests/ops/linear/swiglu/cases_nvfp4.cpp (91972187); gate in tests/ops/suite.cpp	done stage 1 (policy gate)	25c782aa
+gone	tests/ops/linear_swiglu/test_nvfp4.cpp	tests/ops/linear/swiglu/cases_nvfp4.cpp (91972187); gate in tests/ops/suite.cpp	done 94156970 (policy gate)	25c782aa
 fork-new	tests/ops/linear_swiglu/test_q4_a8.cpp	tests/ops/linear_swiglu/test_q4_a8.cpp  [dir GONE upstream]	3 PR15	7a507d1f
-gone	tests/ops/softmax_attention/causal_cache.cpp	tests/ops/softmax_attention/causal/cases.cpp (f30e661f)	done stage 1 (storage gate); open: 2 K2 (oracle for the fork e8 family; upstream int8 cases stay rotated)	55dd995e
-gone	tests/ops/test_attn_input_proj.cpp	tests/ops/linear/split/ (4eb2c042); gate in tests/ops/suite.cpp	done stage 1 (policy gate); open: 3 PR15	7a507d1f 25c782aa
-fork-new	tests/ops/test_e8_root_codec.cu	tests/ops/kv_cache/e8_root_codec.cu	0 carried f45bf0da	94830b3f
-gone	tests/ops/test_gdn_gating_proj.cpp	tests/ops/linear_attention/gated_delta_net/control/cases.cpp (f7d3090b)	0 carried fea50ce8 (capacity hunk dissolved)	8f3e943c a3cb1abc
-gone	tests/ops/test_gdn_input_proj.cpp	tests/ops/linear_attention/gated_delta_net/input_conv/ (f2620157); gate in tests/ops/suite.cpp	done stage 1 (policy gate); open: 3 PR15	7a507d1f 25c782aa
-gone	tests/ops/test_gdn_input_proj_conv_record.cpp	tests/ops/linear_attention/gated_delta_net/input_conv/record_cases.cpp (f2620157)	done stage 1 (policy gate)	25c782aa
-gone	tests/ops/test_gdn_input_proj_conv_snapshot.cpp	tests/ops/linear_attention/gated_delta_net/input_conv/snapshot_cases.cpp (f2620157)	done stage 1 (policy gate)	25c782aa
+gone	tests/ops/softmax_attention/causal_cache.cpp	tests/ops/softmax_attention/causal/cases.cpp (f30e661f)	done 94156970, 9c6e9353 (storage gate); open: 2 K2 (oracle for the fork e8 family; upstream int8 cases stay rotated)	55dd995e
+gone	tests/ops/test_attn_input_proj.cpp	tests/ops/linear/split/ (4eb2c042); gate in tests/ops/suite.cpp	done 94156970 (policy gate); open: 3 PR15	7a507d1f 25c782aa
+fork-new	tests/ops/test_e8_root_codec.cu	tests/ops/kv_cache/e8_root_codec.cu	done f45bf0da	94830b3f
+gone	tests/ops/test_gdn_gating_proj.cpp	tests/ops/linear_attention/gated_delta_net/control/cases.cpp (f7d3090b)	done fea50ce8 (capacity hunk dissolved)	8f3e943c a3cb1abc
+gone	tests/ops/test_gdn_input_proj.cpp	tests/ops/linear_attention/gated_delta_net/input_conv/ (f2620157); gate in tests/ops/suite.cpp	done 94156970 (policy gate); open: 3 PR15	7a507d1f 25c782aa
+gone	tests/ops/test_gdn_input_proj_conv_record.cpp	tests/ops/linear_attention/gated_delta_net/input_conv/record_cases.cpp (f2620157)	done 94156970 (policy gate)	25c782aa
+gone	tests/ops/test_gdn_input_proj_conv_snapshot.cpp	tests/ops/linear_attention/gated_delta_net/input_conv/snapshot_cases.cpp (f2620157)	done 94156970 (policy gate)	25c782aa
 gone	tests/ops/test_gdn_replay_fold.cpp	deleted in f2620157; candidates: tests/ops/linear_attention/gated_delta_net/test_fold.cpp (15/15); tests/ops/linear_attention/gated_delta_net/input_conv/record.cpp (4/15); bench/ops/causal_conv1d_silu_bench.cu (3/15)	1 B5 (MSVC: std::sqrt not constexpr)	ad51c40f(merge) 82f07c34(merge) 2aaaaf5d(merge)
-gone	tests/ops/test_kv_cache_append.cpp	tests/ops/kv_cache/append_full.cpp, append_prefix.cpp (f30e661f)	done stage 1 (storage gate); open: 2 K1 (unrotated-K hunk only with the fork append path)	df08f261
+gone	tests/ops/test_kv_cache_append.cpp	tests/ops/kv_cache/append_full.cpp, append_prefix.cpp (f30e661f)	done 94156970, 9c6e9353 (storage gate); open: 2 K1 (unrotated-K hunk only with the fork append path)	df08f261
 gone	tests/targets/qwen3_6/test_frontend.cpp	deleted in 9cfd5646; candidates: tests/models/common/qwen/test_frontend.cpp (14/15); tests/models/glm5next/output_fixture.h (5/15); src/models/common/qwen/frontend/frontend.cpp (4/15)	1 B2/B5 3090 base; 4 R12; 6 frontend test; DROP R4	328d9aa8 9f63c77b 127bd74c 09a93fd4
 gone	tests/targets/qwen3_6_27b/test_engine_prefix_real.cpp	gone before 81c8ce09; candidates: tests/models/qwen3_5/test_engine_prefix_real.cpp (12/15); tests/models/qwen3_5/test_engine_preemption_real.cpp (10/15); include/ninfer/types.h (10/15)	2 K2 partials; 3 PR15; DROP R6 test, R6, R3 spill guard, R4, R3, R1 test, R1e slots, R3 auto-save, turn ring test	8adf1797 1f7ee28f 7a507d1f 87230fd9 02d0976d 6f327f49 03a99aa1 9f63c77b ba56a232 481e0608 bf8c8d65 8093c640 2cbe488d
 modified-in-place	tests/test_gdn_replay_records.cpp	tests/test_gdn_replay_records.cpp	1 B5 (MSVC aligned alloc)	82f07c34(merge) 2aaaaf5d(merge)
@@ -194,15 +194,15 @@ modified-in-place	tests/test_serve_options.cpp	tests/test_serve_options.cpp	2 K1
 fork-new	tests/test_slot_files.cpp	tests/test_slot_files.cpp	DROP R1 slots	beaeb70a
 fork-new	tests/test_slot_spill_guard.cpp	tests/test_slot_spill_guard.cpp	DROP R3 spill guard	03a99aa1
 gone	tests/test_tool_call_parser.cpp	deleted in 9cfd5646; candidates: tests/models/common/qwen/test_tool_call_parser.cpp (11/15); src/models/common/qwen/frontend/tool_call_parser.cpp (7/15); src/models/glm5next/frontend/tool_decoder.cpp (5/15)	6 PR14	6d88143b 724d0333 7d9d8b0a 91829c35
-fork-new	tools/bench/run_qwen38_c_levels.py	tools/bench/run_qwen38_c_levels.py	0 carried caf73a2d; open: 4 flags removed upstream	1351c196
-fork-new	tools/bench/run_qwen38_mtp_k2_k5.py	tools/bench/run_qwen38_mtp_k2_k5.py	0 carried caf73a2d; open: 4 flags removed upstream	e733d039
-fork-new	tools/bench/run_qwen38_mtp_sweep.py	tools/bench/run_qwen38_mtp_sweep.py	0 carried caf73a2d; open: 4 flags removed upstream	e733d039 1351c196
-fork-new	tools/bench/run_qwen38_replayssm_cohort_sweep.py	tools/bench/run_qwen38_replayssm_cohort_sweep.py	0 carried caf73a2d; open: 4 flags removed upstream	984e6b98
-fork-new	tools/bench/run_rk8v4_c2_smoke.py	tools/bench/run_rk8v4_c2_smoke.py	0 carried caf73a2d; open: 4 flags removed upstream	7c2ce91e
-fork-new	tools/bench/run_rk8v4_quality.py	tools/bench/run_rk8v4_quality.py	0 carried caf73a2d; open: 4 flags removed upstream	7c2ce91e
-modified-in-place	tools/bench/run_serve_corpus.py	tools/bench/run_serve_corpus.py	0 carried caf73a2d	1351c196
-fork-new	tools/test_kv/kv_oracle.py	tools/test_kv/kv_oracle.py  [dir GONE upstream]	0 carried f45bf0da	5df406b0
-fork-new	tools/test_kv/test_e8_codec.cu	tools/test_kv/test_e8_codec.cu  [dir GONE upstream]	0 carried f45bf0da	5df406b0
-fork-new	tools/test_kv/test_e8_codec.cuh	tools/test_kv/test_e8_codec.cuh  [dir GONE upstream]	0 carried f45bf0da	5df406b0
-fork-new	tools/test_kv/verify_1m_retrieval.cu	tools/test_kv/verify_1m_retrieval.cu  [dir GONE upstream]	0 carried f45bf0da	981b685e bc569eb8 5df406b0
+fork-new	tools/bench/run_qwen38_c_levels.py	tools/bench/run_qwen38_c_levels.py	done caf73a2d; open: 4 flags removed upstream	1351c196
+fork-new	tools/bench/run_qwen38_mtp_k2_k5.py	tools/bench/run_qwen38_mtp_k2_k5.py	done caf73a2d; open: 4 flags removed upstream	e733d039
+fork-new	tools/bench/run_qwen38_mtp_sweep.py	tools/bench/run_qwen38_mtp_sweep.py	done caf73a2d; open: 4 flags removed upstream	e733d039 1351c196
+fork-new	tools/bench/run_qwen38_replayssm_cohort_sweep.py	tools/bench/run_qwen38_replayssm_cohort_sweep.py	done caf73a2d; open: 4 flags removed upstream	984e6b98
+fork-new	tools/bench/run_rk8v4_c2_smoke.py	tools/bench/run_rk8v4_c2_smoke.py	done caf73a2d; open: 4 flags removed upstream	7c2ce91e
+fork-new	tools/bench/run_rk8v4_quality.py	tools/bench/run_rk8v4_quality.py	done caf73a2d; open: 4 flags removed upstream	7c2ce91e
+modified-in-place	tools/bench/run_serve_corpus.py	tools/bench/run_serve_corpus.py	done caf73a2d	1351c196
+fork-new	tools/test_kv/kv_oracle.py	tools/test_kv/kv_oracle.py  [dir GONE upstream]	done f45bf0da	5df406b0
+fork-new	tools/test_kv/test_e8_codec.cu	tools/test_kv/test_e8_codec.cu  [dir GONE upstream]	done f45bf0da	5df406b0
+fork-new	tools/test_kv/test_e8_codec.cuh	tools/test_kv/test_e8_codec.cuh  [dir GONE upstream]	done f45bf0da	5df406b0
+fork-new	tools/test_kv/verify_1m_retrieval.cu	tools/test_kv/verify_1m_retrieval.cu  [dir GONE upstream]	done f45bf0da	981b685e bc569eb8 5df406b0
 fork-new	vcpkg.json	vcpkg.json  [dir GONE upstream]	1 B5	09a93fd4
