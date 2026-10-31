@@ -47,6 +47,7 @@ max_tokens = "default" # CLI: 128; serve: 8192. Also accepts a positive integer.
 thinking = "model" # model / true / false
 preserve_thinking = "model" # model / true / false
 thinking_budget = "none" # none or a positive integer; limits model-origin thinking tokens only.
+thinking_control = "model" # model or a non-empty body without </think>; closes reasoning at the budget.
 
 [generation.sampling]
 temperature = "model" # model or [0,2]; 0 selects greedy sampling.

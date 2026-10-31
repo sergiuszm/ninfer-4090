@@ -73,6 +73,8 @@ constexpr FieldSpec kFields[] = {
      "--no-preserve-thinking", "", "Retain closed-turn reasoning; also accepts =model."},
     {Field::ThinkingBudget, "generation.thinking_budget", "--thinking-budget", "", "N|none",
      "Model-origin thinking token budget."},
+    {Field::ThinkingControl, "generation.thinking_control", "--thinking-control", "", "TEXT|model",
+     "Body of the control that closes reasoning at the thinking budget; no </think>."},
     {Field::Temperature, "generation.sampling.temperature", "--temperature", "", "F|model",
      "Sampling temperature [0,2]; 0 selects greedy."},
     {Field::TopK, "generation.sampling.top_k", "--top-k", "", "N|model",
@@ -300,6 +302,7 @@ FieldValue parse_field_value(Field field, const RawValue& value, bool command_li
     case Field::PresencePenalty:
     case Field::FrequencyPenalty:
     case Field::ReasoningEffort:
+    case Field::ThinkingControl:
         if (is("model")) return DefaultValue{};
         break;
     case Field::ThinkingBudget:
@@ -395,6 +398,7 @@ FieldValue parse_field_value(Field field, const RawValue& value, bool command_li
     case Field::Messages:
     case Field::GrammarFile:
     case Field::JsonSchemaFile:
+    case Field::ThinkingControl:
         return text(value, true);
     case Field::ChatTemplate:
     case Field::CostPresets:

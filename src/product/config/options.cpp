@@ -447,6 +447,9 @@ ParsedOptions parse(int argc, char** argv, EntryPoint entry,
         case Field::ThinkingBudget:
             generation.thinking_budget = u32();
             break;
+        case Field::ThinkingControl:
+            engine.thinking_control = string();
+            break;
         case Field::Temperature:
             sampling.temperature = real();
             break;

@@ -125,6 +125,25 @@ void test_request_defaults() {
             "server output default overflowed at the protocol boundary");
 }
 
+void test_thinking_control() {
+    require(!parse({"ninfer-serve", "model.ninfer"}).launch.engine.thinking_control,
+            "thinking control is set by default");
+    const auto custom =
+        parse({"ninfer-serve", "model.ninfer", "--thinking-control", "custom guidance"});
+    require(custom.launch.engine.thinking_control == "custom guidance",
+            "--thinking-control did not preserve its value");
+    const auto view = ninfer::product::format_configuration(
+        ninfer::product::configuration_view(custom));
+    require(view.find("custom guidance") != std::string::npos,
+            "startup display lost the thinking control");
+    const auto reset = parse({"ninfer-serve", "model.ninfer", "--thinking-control", "custom",
+                              "--thinking-control", "model"});
+    require(!reset.launch.engine.thinking_control,
+            "--thinking-control model did not select the model default");
+    rejects([] { (void)parse({"ninfer-serve", "model.ninfer", "--thinking-control", ""}); });
+    rejects([] { (void)parse({"ninfer-serve", "model.ninfer", "--thinking-control"}); });
+}
+
 void test_provenance() {
     for (auto args : std::vector<std::vector<std::string>>{
              {"ninfer-serve", "model.ninfer", "--api-key", "private-value"},
@@ -148,6 +167,7 @@ int main() {
     try {
         test_resources_and_units();
         test_request_defaults();
+        test_thinking_control();
         test_provenance();
         std::cout << "ok\n";
         return 0;
