@@ -324,7 +324,7 @@ static int run_cases(std::string_view label, QType format, const InvocationCase&
     const QType qtype         = format;
     int failures              = 0;
     std::size_t executed_peak = 0;
-    // Fork-local (PR #15): Q5 under an A8 permission uses INT8 at every T, so a token's output
+    // Fork-local (PR #15): Q5 under AllowA8 uses INT8 at every T, so a token's output
     // must not depend on the call width. Eager A8 calls compare their shared leading tokens.
     std::vector<std::uint16_t> previous_int8;
     for (const Invocation& invocation : shape.invocations) {
@@ -364,8 +364,7 @@ static int run_cases(std::string_view label, QType format, const InvocationCase&
             // Graph capture and permissive follow-ups may select other routes; the A16 interval
             // witness belongs to the eager calls.
             executed_peak = std::max(executed_peak, workspace.peak_used());
-            if (qtype == QType::Q5_G64_FP16 && invocation.policy &&
-                ops::allows_a8(*invocation.policy)) {
+            if (qtype == QType::Q5_G64_FP16 && invocation.policy == ops::LinearPolicy::AllowA8) {
                 std::vector<std::uint16_t> actual(output.bytes() / sizeof(std::uint16_t));
                 output.copy_to_host(actual.data(), output.bytes());
                 const auto shared = std::min(previous_int8.size(), actual.size());

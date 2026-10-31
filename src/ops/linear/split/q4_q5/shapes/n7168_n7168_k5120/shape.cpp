@@ -2,15 +2,17 @@
 
 namespace ninfer::ops::detail::linear_split::q4_q5_n7168_n7168_k5120 {
 namespace {
-// A permission for A8 selects group-64 INT8 activations at every token extent, so a prefill
-// suffix whose width changes with prefix reuse never switches activation precision.
+// AllowA8 selects group-64 INT8 activations at every token extent, so a prefill suffix whose
+// width changes with prefix reuse never switches activation precision. AllowA4 keeps A16.
+bool uses_int8(LinearPolicy policy) { return policy == LinearPolicy::AllowA8; }
+
 std::size_t capacity(LinearPolicy policy, std::int32_t, std::int32_t last) {
-    return allows_a8(policy) ? int8_proj_workspace_capacity_bytes(5120, last) : 0;
+    return uses_int8(policy) ? int8_proj_workspace_capacity_bytes(5120, last) : 0;
 }
 
 void launch(const Tensor& x, Weights weights, std::span<const Tensor> outputs,
             MemoryArena* workspace, cudaStream_t stream) {
-    if (allows_a8(weights.policy)) {
+    if (uses_int8(weights.policy)) {
         const auto scratch = allocate_int8_proj_workspace(*workspace, x.ne[0], x.ne[1]);
         launch_int8(x, weights.first, *weights.second, outputs, scratch, stream);
         return;

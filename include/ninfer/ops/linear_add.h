@@ -32,10 +32,10 @@ namespace ninfer::ops {
  * FP8_E4M3FN_ROW_BF16 or NVFP4 geometry and its native stored representation.
  * x and weight storage must not overlap residual. Updates the entire residual in place.
  *
- * Q4/Q8/BF16 use A16. Q5 and FP8 permit A8 with AllowA8/AllowA4; Q5 A8 is symmetric
- * group-64 INT8 activation quantization and INT8 contraction at every positive T, with FP32
- * cross-group accumulation. NVFP4 permits A4 with AllowA4. The overload without a policy uses
- * A16Only.
+ * Q4/Q8/BF16 use A16. FP8 permits A8 with AllowA8/AllowA4. Q5 permits A8 with AllowA8 only:
+ * symmetric group-64 INT8 activation quantization and INT8 contraction at every positive T,
+ * with FP32 cross-group accumulation. NVFP4 permits A4 with AllowA4. The overload without a
+ * policy uses A16Only.
  * Caller workspace is scoped to the call; A16 requires no scratch. No persistent state.
  */
 void linear_add(const Tensor& x, const Weight& w, Tensor& residual, MemoryArena& ws,

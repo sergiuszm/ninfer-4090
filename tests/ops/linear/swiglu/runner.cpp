@@ -283,10 +283,10 @@ static int run_profile(std::string_view label, const Profile& profile,
                                              profile.qtype, profile.gate_up_rows,
                                              profile.input_rows, policy, 1, admitted_maximum);
     int failures                 = 0;
-    // Fork-local (PR #15): Q4 under an A8 permission uses INT8 at every T, so a token's output
-    // must not depend on the call width. Eager calls run in increasing token order.
+    // Fork-local (PR #15): Q4 under AllowA8 uses INT8 at every T, so a token's output must not
+    // depend on the call width. Eager calls run in increasing token order.
     const bool int8_invariant =
-        profile.qtype == QType::Q4_G64_FP16 && ops::allows_a8(profile.policy);
+        profile.qtype == QType::Q4_G64_FP16 && profile.policy == ops::LinearPolicy::AllowA8;
     std::vector<double> previous_int8;
     const auto run_case          = [&](const Invocation& call) {
         const auto tokens   = call.tokens;

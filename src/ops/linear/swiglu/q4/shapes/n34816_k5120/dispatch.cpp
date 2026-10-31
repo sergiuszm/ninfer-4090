@@ -48,9 +48,9 @@ std::size_t materialized_bytes(int tokens) {
     return layout.peak_bytes(1);
 }
 
-// An A8 permission selects group-64 INT8 activations at every token extent, so a prefill
-// suffix whose width changes with prefix reuse never switches activation precision.
-bool uses_int8(LinearPolicy policy) { return allows_a8(policy); }
+// AllowA8 selects group-64 INT8 activations at every token extent, so a prefill suffix whose
+// width changes with prefix reuse never switches activation precision. AllowA4 keeps A16.
+bool uses_int8(LinearPolicy policy) { return policy == LinearPolicy::AllowA8; }
 } // namespace
 
 std::size_t q4_linear_swiglu_capacity_workspace_bytes(int rows, int k, LinearPolicy policy,

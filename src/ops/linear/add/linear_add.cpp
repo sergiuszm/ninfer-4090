@@ -35,11 +35,11 @@ detail::LinearAddLaunch select_a16(QType type, int rows, int k, int tokens) {
     }
 }
 
-// An A8 permission selects INT8 for Q5 at every token extent, so a prefill suffix whose width
-// changes with prefix reuse never switches activation precision. The A16 catalogue owns the
-// admitted Q5 shapes for both routes.
+// AllowA8 selects INT8 for Q5 at every token extent, so a prefill suffix whose width changes
+// with prefix reuse never switches activation precision. AllowA4 keeps A16. The A16 catalogue
+// owns the admitted Q5 shapes for both routes.
 bool q5_int8(QType type, LinearPolicy policy) {
-    return type == QType::Q5_G64_FP16 && allows_a8(policy);
+    return type == QType::Q5_G64_FP16 && policy == LinearPolicy::AllowA8;
 }
 
 void validate_operands(const Tensor& x, const Weight& w, const Tensor& residual,
