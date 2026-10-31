@@ -1,6 +1,7 @@
 #include "product/config/options.h"
 #include "serve/translate.h"
 #include "serve/openai_chat.h"
+#include "serve/anthropic_messages.h"
 #include "product/logging/configuration.h"
 
 #include <iostream>
@@ -125,6 +126,31 @@ void test_request_defaults() {
             "server output default overflowed at the protocol boundary");
 }
 
+void test_effort_tiers_reach_the_frontend() {
+    // The serve layer passes every public tier through; the Qwen frontend maps the tiers that
+    // the 27B template lacks (tests/models/common/qwen/test_frontend.cpp).
+    const auto options  = parse({"ninfer-serve", "model.ninfer"});
+    const auto messages = RequestJson::array({{{"role", "user"}, {"content", "x"}}});
+    for (const auto& [wire, effort] :
+         std::vector<std::pair<std::string, ninfer::ReasoningEffort>>{
+             {"max", ninfer::ReasoningEffort::Max},
+             {"high", ninfer::ReasoningEffort::High},
+             {"minimal", ninfer::ReasoningEffort::Minimal}}) {
+        const auto chat = parse_chat_completion_request(
+            RequestJson{{"model", "test"}, {"messages", messages}, {"reasoning_effort", wire}}, {});
+        require(collect_prompt_options(chat.generation, options).reasoning_effort == effort,
+                "Chat reasoning_effort did not reach the frontend unchanged");
+        const auto anthropic = parse_anthropic_messages_request(
+            RequestJson{{"model", "test"},
+                        {"max_tokens", 64},
+                        {"messages", messages},
+                        {"output_config", {{"effort", wire}}}},
+            {});
+        require(collect_prompt_options(anthropic.generation, options).reasoning_effort == effort,
+                "Messages output_config.effort did not reach the frontend unchanged");
+    }
+}
+
 void test_thinking_control() {
     require(!parse({"ninfer-serve", "model.ninfer"}).launch.engine.thinking_control,
             "thinking control is set by default");
@@ -168,6 +194,7 @@ int main() {
         test_resources_and_units();
         test_request_defaults();
         test_thinking_control();
+        test_effort_tiers_reach_the_frontend();
         test_provenance();
         std::cout << "ok\n";
         return 0;

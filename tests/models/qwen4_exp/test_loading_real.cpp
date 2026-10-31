@@ -292,6 +292,22 @@ int main(int argc, char** argv) {
                             plan->workspace.finish >= 248320ULL * 1024 * 2 + 8192,
                         "scoring resource lifetime");
             }
+            {
+                // A custom thinking control is bound with the definition, and the single-process
+                // profile sizes control work from the same tokens.
+                EngineOptions custom;
+                custom.thinking_control = "Stop exploring now. Summarize the strongest line of "
+                                          "reasoning so far, then answer directly.";
+                const auto plain   = q4::read_definition(reader, models::load_options({}));
+                const auto defined = q4::read_definition(reader, models::load_options(custom));
+                const auto& control = *defined->resources().text.control_tokens;
+                require(defined->resources().text.tokenizer->decode(control) ==
+                                "\n\n " + *custom.thinking_control + "\n</think>\n\n" &&
+                            control.size() > plain->resources().text.control_tokens->size() &&
+                            q4::execution::describe_model(*defined)->control_token_limit ==
+                                control.size(),
+                        "custom thinking control was not bound for Qwen4Exp");
+            }
             for (const bool vision : {false, true})
                 for (const bool mtp : {false, true}) {
                     EngineOptions options;
