@@ -188,11 +188,13 @@ ninfer::EngineOptions engine_options(const char* artifact) {
     return options;
 }
 
+constexpr std::uint32_t kHostRestoreContext = 512;
+
 ninfer::EngineOptions host_restore_engine_options(const char* artifact) {
     ninfer::EngineOptions options;
     options.prefill_activations       = prefill_activations_under_test();
     options.artifact_path             = artifact;
-    options.max_context               = 512;
+    options.max_context               = kHostRestoreContext;
     options.prefill_chunk             = 256;
     options.speculative.backend       = ninfer::SpeculativeBackend::Mtp;
     options.speculative.draft_tokens  = 3;
@@ -828,9 +830,14 @@ int exercise_host_restore(const char* artifact) {
     continuation.push_back(retained.generated_token_ids.front() == 198 ? 5834 : 198);
     continuation.insert(continuation.end(), 5, 198);
 
+    // Fork-local (catch-up #4), upstream test geometry: on the Qwen3.8 artifact the record-class
+    // packing of the exact working-set capacity leaves room for a 262-token request beside both
+    // retained checkpoints (GPU window 6: state_objects 2->2, nothing backed up). The pressure
+    // request therefore fills max_context, the full working set the capacity was sized for.
+    const std::vector<ninfer::TokenId> pressure_input(kHostRestoreContext - 2U, 198);
     const ninfer::RuntimeStats before_pressure = engine.snapshot().runtime;
     const ninfer::GenerationResult pressure_result =
-        engine.generate(engine.prepare_tokens(continuation), options(2, false));
+        engine.generate(engine.prepare_tokens(pressure_input), options(2, false));
     const ninfer::RuntimeStats after_pressure = engine.snapshot().runtime;
     const auto transfer_bytes = [](const ninfer::RuntimeStats& stats, std::size_t direction) {
         auto bytes = stats.context_transfers.state[direction].bytes;
