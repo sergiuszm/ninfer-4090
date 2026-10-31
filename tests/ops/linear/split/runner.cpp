@@ -5,8 +5,11 @@
 #include "ninfer/ops/linear_split.h"
 #include "ninfer/ops/weight_input.h"
 #include "ops/input_projection_test_common.h"
+#include "ops/linear/kernels/int8/int8_proj_launch.h"
 #include "ops/linear/weights.h"
 
+#include <algorithm>
+#include <cstring>
 #include <memory>
 #include <numeric>
 #include <set>
@@ -257,6 +260,30 @@ bool paired_groupwise(const Profile& profile) {
            profile.weights[1].type == QType::Q5_G64_FP16;
 }
 
+// Fork-local (PR #15): linear_split allocates the INT8 backing before the launch, so the exact
+// high-water proves only that the capacity query saw AllowA8. Only an INT8 launch quantizes the
+// activation into the backing, and it writes every FP32 group scale of the token tile; a
+// non-negative scale never equals the 0x5a or 0xa5 fill word. The backing starts at the scratch
+// base, so the routes' own layout helper locates the scales.
+int verify_int8_staging_written(const std::string& id, GuardedDeviceBuffer& scratch,
+                                std::int32_t k, std::int32_t tokens, int fill) {
+    MemoryArena layout(scratch.span());
+    const auto staging = ops::detail::allocate_int8_proj_workspace(layout, k, tokens);
+    const auto offset  = static_cast<std::size_t>(reinterpret_cast<const char*>(staging.scales) -
+                                                 static_cast<const char*>(scratch.data()));
+    const auto count   = static_cast<std::size_t>(ops::detail::int8_proj_padded_k(k) / 64) *
+                       static_cast<std::size_t>(ops::detail::int8_proj_token_tile(tokens));
+    std::vector<std::uint32_t> scales(count);
+    scratch.copy_to_host(scales.data(), count * sizeof(std::uint32_t), offset);
+    std::uint32_t fill_word = 0;
+    std::memset(&fill_word, fill, sizeof(fill_word));
+    const auto stale = std::count(scales.begin(), scales.end(), fill_word);
+    if (stale == 0) return 0;
+    std::cerr << id << ": " << stale << " of " << count
+              << " INT8 group scales still hold the scratch fill (no INT8 launch)\n";
+    return 1;
+}
+
 // Fork-local (PR #15): INT8 activations are quantized per token, so a token's outputs must not
 // depend on its column or the call width. Tokens 4..131 of a 260-wide call are compared bitwise
 // with the same tokens re-indexed to columns 0..127 of a 128-wide call, as prefix reuse
@@ -337,8 +364,8 @@ int run(const Profile& profile, std::span<const Invocation> calls) {
         Outputs output(profile, call.t, call.shared_output);
         const auto capacity =
             ops::linear_split_workspace_capacity_bytes(prepared, profile.outputs, call.t, call.t);
-        // Fork-local (PR #15): the INT8 route stages exactly its capacity; an A16 fallback would
-        // allocate nothing, so the exact high-water proves which route ran.
+        // Fork-local (PR #15): the INT8 route stages exactly its capacity, and its launch writes
+        // the staging (verify_int8_staging_written).
         const bool int8_route = !call.convenience && call.policy == ops::LinearPolicy::AllowA8 &&
                                 paired_groupwise(profile);
         if (int8_route && capacity == 0) {
@@ -375,7 +402,8 @@ int run(const Profile& profile, std::span<const Invocation> calls) {
                 input.copy_from_host(bits.data(), input.size());
             }
             output.poison();
-            scratch.fill(phase ? 0xa5 : 0x5a);
+            const int fill = phase ? 0xa5 : 0x5a;
+            scratch.fill(fill);
             cuda_synchronize();
             if (call.graph)
                 graph.launch(context.stream());
@@ -385,6 +413,9 @@ int run(const Profile& profile, std::span<const Invocation> calls) {
             failures += verify_output(profile, call, weights, output, activation);
             failures += input_projection::verify_preserved(call.id, input, bits);
             failures += scratch.verify_guards(call.id);
+            if (int8_route)
+                failures +=
+                    verify_int8_staging_written(call.id, scratch, profile.k, call.t, fill);
             if (workspace.used() != 0 || workspace.peak_used() > capacity ||
                 (int8_route && workspace.peak_used() != capacity)) {
                 std::cerr << call.id << ": workspace query/scope mismatch\n";
