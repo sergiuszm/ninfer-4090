@@ -65,7 +65,7 @@ ReductionCriterion criterion(const Profile& profile, ops::LinearPolicy policy) {
     case ops::LinearPolicy::A16Only:
         return profile.a16;
     case ops::LinearPolicy::AllowA8:
-        return {0.04, 1.0 / 256.0, 0.06};
+        return profile.a8;
     case ops::LinearPolicy::AllowA4:
         return {0.16, profile.a4_absolute, 0.16};
     }

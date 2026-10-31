@@ -37,13 +37,16 @@ constexpr ReductionCriterion kA16Tolerance{
 };
 constexpr ReductionCriterion kA8Tolerance{0.04, kBf16UnitRoundoff, 0.06};
 constexpr ReductionCriterion kA4Tolerance{0.16, kBf16UnitRoundoff, 0.16};
+// Fork-local (PR #15): Q5 A8 is group-64 INT8 activation quantization, validated in production
+// with this criterion. The oracle still evaluates the original BF16 inputs.
+constexpr ReductionCriterion kQ5A8Tolerance{4.0e-2, 2.0e-2, 5.0e-2};
 
-const ReductionCriterion& criterion(ops::LinearPolicy policy) {
+const ReductionCriterion& criterion(QType qtype, ops::LinearPolicy policy) {
     switch (policy) {
     case ops::LinearPolicy::A16Only:
         return kA16Tolerance;
     case ops::LinearPolicy::AllowA8:
-        return kA8Tolerance;
+        return qtype == QType::Q5_G64_FP16 ? kQ5A8Tolerance : kA8Tolerance;
     case ops::LinearPolicy::AllowA4:
         return kA4Tolerance;
     }
@@ -234,7 +237,7 @@ Oracle make_oracle(const InvocationCase& shape, const HostWeight& weight,
 
 int verify_output(std::string_view label, const GuardedDeviceBuffer& output,
                   const InvocationCase& shape, const Invocation& invocation, const Oracle& oracle,
-                  std::span<const std::uint16_t> residual, ops::LinearPolicy policy,
+                  std::span<const std::uint16_t> residual, const ReductionCriterion& tolerance,
                   bool negative) {
     const auto columns = select_indices(invocation.tokens, shape.columns);
     std::vector<std::size_t> wanted;
@@ -278,7 +281,7 @@ int verify_output(std::string_view label, const GuardedDeviceBuffer& output,
         std::cerr << label << ": output contains " << nonfinite_count << " non-finite values\n";
         ++failures;
     }
-    return failures + verify_reduction(label, actual, expected, criterion(policy));
+    return failures + verify_reduction(label, actual, expected, tolerance);
 }
 
 int verify_zero_input(std::string_view label, const GuardedDeviceBuffer& output,
@@ -349,7 +352,8 @@ static int run_cases(std::string_view label, QType format, const InvocationCase&
         const auto verify      = [&](std::string_view stage, ops::LinearPolicy policy,
                                 bool negative = false) {
             failures += verify_output(case_label + " " + std::string(stage), output, shape,
-                                           invocation, oracle, residual, policy, negative);
+                                           invocation, oracle, residual, criterion(qtype, policy),
+                                           negative);
         };
         try {
             if (invocation.policy) {

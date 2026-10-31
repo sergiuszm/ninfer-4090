@@ -12,6 +12,7 @@ void add_two_output_cases(Suite& suite) {
                         {10240, 6144},
                         {{0, 4096}, {4096, 6144}, {10240, 6144}},
                         paired_a16};
+        profile.a8 = {4.0e-2, 2.0e-2, 5.0e-2};
         std::vector<Invocation> calls;
         for (int t : {1,  2,  3,  4,  5,  6,  7,  8,  9,   10,  11,  12,
                       13, 15, 16, 17, 32, 33, 64, 65, 127, 128, 129, 193})

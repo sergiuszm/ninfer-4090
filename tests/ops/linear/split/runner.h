@@ -30,6 +30,10 @@ struct Profile {
     double a4_absolute = 1.0 / 256.0;
     Binding binding    = Binding::Direct;
     std::vector<int> input_slices;
+    // Fork-local (PR #15): the AllowA8 criterion. The default is upstream's FP8 A8 criterion,
+    // which production also used for the attention Q4/Q5 INT8 route; the GDN Q4/Q5 form sets the
+    // one production validated for it.
+    ReductionCriterion a8{0.04, 1.0 / 256.0, 0.06};
 };
 
 struct Invocation {
