@@ -48,6 +48,12 @@ ninfer::PrefillActivations prefill_activations_under_test() {
     throw std::invalid_argument("NINFER_PREFIX_REAL_PREFILL_ACTIVATIONS must be a16 or int8");
 }
 
+// Fork-local (catch-up #4), upstream test bug: since 41e50d0d the default ToolConstraintMode::Basic
+// constrains every request that declares tools, and output constraints refuse requests without
+// the model EOS stops. The reuse steps that declare tools and count a fixed number of outputs with
+// model stops off use this mode; they test prefix reuse, not the tool grammar.
+constexpr auto kUnconstrainedTools = ninfer::ToolConstraintMode::Automatic;
+
 ninfer::EngineOptions engine_options(const char* artifact) {
     ninfer::EngineOptions options;
     options.prefill_activations       = prefill_activations_under_test();
@@ -854,6 +860,7 @@ int exercise_nested_tool_markers(const char* artifact) {
     request.execution.sampling.temperature    = 0.0F;
     request.execution.allow_prefix_reuse      = true;
     request.stop.include_model_defaults       = false;
+    request.tool_choice.constraints           = kUnconstrainedTools;
 
     // A single source creates both markers. Each probe changes the user suffix so the
     // private response/endpoint cannot satisfy the shared-prefix conformance check.
@@ -938,6 +945,7 @@ int exercise_anthropic_prefix_regression(const char* artifact) {
         options.execution.sampling.temperature    = 0.0F;
         options.execution.allow_prefix_reuse      = true;
         options.stop.include_model_defaults       = model_stops;
+        options.tool_choice.constraints           = kUnconstrainedTools;
         return options;
     };
 
@@ -1329,6 +1337,7 @@ int exercise_rewrite_checkpoints(ninfer::Engine& engine) {
         result.execution.sampling.temperature    = 0.0F;
         result.execution.allow_prefix_reuse      = reuse;
         result.stop.include_model_defaults       = false;
+        result.tool_choice.constraints           = kUnconstrainedTools;
         return result;
     };
 
@@ -1433,6 +1442,7 @@ int exercise_agent_continuation(const char* artifact) {
     request.execution.sampling.temperature    = 0.0F;
     request.execution.allow_prefix_reuse      = true;
     request.stop.include_model_defaults       = false;
+    request.tool_choice.constraints           = kUnconstrainedTools;
     const auto opener_tokens =
         static_cast<std::uint32_t>(engine.tokenize_text("<|im_start|>assistant\n<think>\n").size());
     const auto closing_tokens =
@@ -1590,6 +1600,7 @@ int exercise_rewrite_branch(const char* artifact) {
         value.execution.sampling.temperature    = 0.0F;
         value.execution.allow_prefix_reuse      = reuse;
         value.stop.include_model_defaults       = false;
+        value.tool_choice.constraints           = kUnconstrainedTools;
         return value;
     };
 
