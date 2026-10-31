@@ -26,16 +26,20 @@ std::vector<Case> projection_cases(Profile p) {
     } else if (p.input_rows == 2560)
         boundaries(outputs,
                    {1, 4, 8, 192, 448, 512, 896, 1024, 1280, 2048, 2688, 5120, 7168, 8192});
-    else if (p.input_rows == 5120)
-        boundaries(outputs, {1, 8, 1024, 2048, 4096});
-    else
+    else if (p.input_rows == 5120) {
+        // Both sides of each sm_89 route seam (plan.cpp). T=2689, the unsplit onset, is left to
+        // T=4097: before the pairwise unsplit accumulation the onset missed the projection
+        // criterion. Requalify it on sm_89 before adding it here.
+        boundaries(outputs, {1, 8, 1280, 4096});
+        outputs.insert(outputs.end(), {{1024}, {2048}, {2687}, {2688}});
+    } else
         boundaries(outputs, {127, 1024, 2048, 4096});
     outputs.push_back({8192});
     unique(outputs);
     // The paired representation is independently checked at every production route. Related
     // parent cases establish the complete seam neighborhoods and shared mechanism properties.
     if (p.storage == Storage::Pair) {
-        outputs = {{1}, {8}, {9}, {1024}, {1025}, {2049}, {4097}, {8192}};
+        outputs = {{1}, {8}, {9}, {1024}, {1280}, {1281}, {2048}, {2688}, {4097}, {8192}};
     }
     for (auto& c : outputs)
         if (c.columns == 1 || c.columns == 128 || c.columns == 4097) c.execution = Execution::Graph;
