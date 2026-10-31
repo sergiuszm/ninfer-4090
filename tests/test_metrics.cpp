@@ -107,6 +107,7 @@ int main() {
     served.runtime.committed_decode_tokens += 64;
     served.executions[0].exposure.total.total_ns += 2'000'000'000;
     served.executions[1].exposure.total.total_ns += 1'500'000'000;
+    // Control exposure stays out of decode seconds, matching the fork's production counters.
     served.executions[3].exposure.total.total_ns += 7'000'000'000;
     served.runtime.running_requests = 2;
     served.runtime.waiting_requests = 1;

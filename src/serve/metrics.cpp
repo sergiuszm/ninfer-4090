@@ -502,7 +502,9 @@ std::string Metrics::render(const EngineSnapshot& snapshot, bool ready) const {
 
     // llama.cpp --metrics names for scrapers that read llama.cpp servers (the fleet dashboard).
     // Same warmup baseline as the ninfer_ counters. Seconds are the per-kind execution exposure,
-    // so the rates are computed tokens per accepted-to-retired unit time.
+    // so the rates are computed tokens per accepted-to-retired unit time. As on the fork's
+    // production line, forced thinking-control tokens count as predicted tokens while the
+    // Control forward that commits them is not decode time.
     const auto llamacpp = [&](std::string_view name, std::string_view type, auto value,
                               std::string_view help) {
         out << "# HELP llamacpp:" << name << ' ' << help << '\n'
@@ -522,9 +524,9 @@ std::string Metrics::render(const EngineSnapshot& snapshot, bool ready) const {
              "Prefill execution exposure.");
     llamacpp("tokens_predicted_total", "counter",
              stats.committed_decode_tokens - baseline.committed_decode_tokens,
-             "Committed decode tokens, excluding the first token.");
+             "Committed decode tokens, excluding the first token; includes forced control tokens.");
     llamacpp("tokens_predicted_seconds_total", "counter", exposure_seconds(ExecutionKind::Decode),
-             "Decode execution exposure.");
+             "Decode execution exposure; excludes forced control work.");
     llamacpp("requests_processing", "gauge", stats.running_requests, "Resident requests.");
     llamacpp("requests_deferred", "gauge", stats.waiting_requests + stats.paused_requests,
              "Requests waiting for admission or paused for recovery.");
