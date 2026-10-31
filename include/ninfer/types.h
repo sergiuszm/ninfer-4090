@@ -403,8 +403,10 @@ struct ToolCallParseDiagnostics {
     std::uint32_t structured_call_count         = 0;
     std::uint32_t schema_mismatch_arguments     = 0;
     ToolCallParseFallbackReason fallback_reason = ToolCallParseFallbackReason::None;
-    // Tolerant tool calls: the strict failure that a completed response recovered from.
+    // Tolerant tool calls: the strict failure that a completed response recovered from, and the
+    // non-whitespace bytes after the last call that were dropped instead of returned as content.
     ToolCallParseFallbackReason recovered_from = ToolCallParseFallbackReason::None;
+    std::uint32_t dropped_trailing_bytes       = 0;
 
     [[nodiscard]] friend constexpr bool
     operator==(const ToolCallParseDiagnostics&, const ToolCallParseDiagnostics&) noexcept = default;
