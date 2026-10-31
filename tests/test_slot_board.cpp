@@ -3,6 +3,8 @@
 #include <nlohmann/json.hpp>
 
 #include <iostream>
+#include <optional>
+#include <utility>
 
 using namespace ninfer::serve;
 using Json = nlohmann::json;
@@ -28,40 +30,56 @@ int main() {
               "rows must not advertise slot persistence");
     }
 
-    board.start(7, 1000);
-    board.start(8, 2000);
-    board.start(9, 3000);
-    slots = Json::parse(board.render());
+    auto first  = board.start(7, 1000);
+    auto second = board.start(8, 2000);
+    auto third  = board.start(9, 3000);
+    slots       = Json::parse(board.render());
     check(slots[0]["is_processing"] == true && slots[0]["n_prompt_tokens"] == 1000 &&
               slots[1]["is_processing"] == true && slots[1]["n_prompt_tokens"] == 2000,
           "started requests must take the idle rows in start order");
 
-    board.finish(7, 600);
+    first.complete(600);
     slots = Json::parse(board.render());
     check(slots[0]["is_processing"] == true && slots[0]["n_prompt_tokens"] == 3000 &&
               slots[0]["n_prompt_tokens_cache"] == 0,
           "a waiting request must take the row released first");
 
-    board.finish(8, 5000);
+    second.complete(5000);
     slots = Json::parse(board.render());
     check(slots[1]["is_processing"] == false && slots[1]["n_prompt_tokens"] == 2000 &&
               slots[1]["n_prompt_tokens_cache"] == 2000,
           "an idle row must keep the completed depth, with the cache clamped to the prompt");
 
-    board.finish(9, std::nullopt);
+    third.release();
+    third.complete(1);
     slots = Json::parse(board.render());
     check(slots[0]["is_processing"] == false && slots[0]["n_prompt_tokens"] == 0,
-          "a failed request must not leave a retained depth");
+          "a failed request must not leave a retained depth, and settles only once");
 
-    board.start(10, 10);
-    board.start(11, 11);
-    board.start(12, 12);
-    board.finish(12, std::nullopt);
-    board.finish(10, 5);
-    board.finish(99, 1);
+    {
+        auto moved = board.start(10, 10);
+        auto owner = std::move(moved);
+        slots      = Json::parse(board.render());
+        check(slots[0]["is_processing"] == true && slots[0]["n_prompt_tokens"] == 10,
+              "a moved lease must keep its row");
+    }
     slots = Json::parse(board.render());
-    check(slots[0]["is_processing"] == false && slots[0]["n_prompt_tokens"] == 10 &&
-              slots[1]["is_processing"] == true && slots[1]["n_prompt_tokens"] == 11,
-          "a request that leaves while waiting must not take a row, unknown ids are ignored");
+    check(slots[0]["is_processing"] == false && slots[0]["n_prompt_tokens"] == 0,
+          "a lease destroyed without settling must release its row as failed");
+
+    {
+        auto busy0   = board.start(11, 11);
+        auto busy1   = board.start(12, 12);
+        auto waiting = std::optional<SlotBoard::Lease>(board.start(13, 13));
+        waiting.reset();
+        busy0.complete(5);
+        slots = Json::parse(board.render());
+        check(slots[0]["is_processing"] == false && slots[0]["n_prompt_tokens"] == 11 &&
+                  slots[1]["is_processing"] == true && slots[1]["n_prompt_tokens"] == 12,
+              "a request that leaves while waiting must not take a row later");
+    }
+    slots = Json::parse(board.render());
+    check(slots[1]["is_processing"] == false,
+          "every unsettled lease must release its row when it is destroyed");
     return failures == 0 ? 0 : 1;
 }

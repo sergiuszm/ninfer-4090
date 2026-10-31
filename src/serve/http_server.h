@@ -72,6 +72,8 @@ private:
         HttpServer* owner_ = nullptr;
         RequestLogContext context_;
         std::atomic<State> state_{State::Pending};
+        // Released as failed on destruction if neither done() nor failure() settles it.
+        SlotBoard::Lease slot_;
     };
 
     [[nodiscard]] std::shared_ptr<RequestLifecycle> begin_request(RequestLogContext context);

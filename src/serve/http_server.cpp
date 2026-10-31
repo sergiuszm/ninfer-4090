@@ -213,6 +213,9 @@ HttpServer::HttpServer(product::ServeOptions options, std::shared_ptr<spdlog::lo
 HttpServer::RequestLifecycle::RequestLifecycle(HttpServer& owner, RequestLogContext context)
     : owner_(&owner), context_(std::move(context)) {
     owner_->record_request_start(context_);
+    // Last: a start record that throws never holds a row.
+    slot_ = owner_->slots_.start(context_.id,
+                                 static_cast<std::uint32_t>(std::max(context_.prompt_tokens, 0)));
 }
 
 bool HttpServer::RequestLifecycle::claim(State terminal) noexcept {
@@ -221,11 +224,17 @@ bool HttpServer::RequestLifecycle::claim(State terminal) noexcept {
 }
 
 void HttpServer::RequestLifecycle::done(const GenerationOutcome& outcome) {
-    if (claim(State::Done)) { owner_->record_request_done(context_, outcome); }
+    if (claim(State::Done)) {
+        slot_.complete(outcome.stats.reused_prompt_tokens);
+        owner_->record_request_done(context_, outcome);
+    }
 }
 
 void HttpServer::RequestLifecycle::failure(const RequestFailure& failure) {
-    if (claim(State::Error)) { owner_->record_request_failure(context_, failure); }
+    if (claim(State::Error)) {
+        slot_.release();
+        owner_->record_request_failure(context_, failure);
+    }
 }
 
 void HttpServer::RequestLifecycle::response_failure(const RequestFailure& failure) {
@@ -237,7 +246,6 @@ std::shared_ptr<HttpServer::RequestLifecycle> HttpServer::begin_request(RequestL
 }
 
 void HttpServer::record_request_start(const RequestLogContext& context) {
-    slots_.start(context.id, static_cast<std::uint32_t>(std::max(context.prompt_tokens, 0)));
     request_jsonl_.write_request_start(context);
     operational_log_.request_start(context);
 }
@@ -266,7 +274,6 @@ ninfer::GenerationSchedulingObserver HttpServer::scheduling_observer(std::uint64
 void HttpServer::record_request_done(const RequestLogContext& context,
                                      const GenerationOutcome& outcome) {
     metrics_.done(outcome);
-    slots_.finish(context.id, outcome.stats.reused_prompt_tokens);
     request_jsonl_.write_request_done(context, outcome);
     operational_log_.request_done(context, outcome);
 }
@@ -274,7 +281,6 @@ void HttpServer::record_request_done(const RequestLogContext& context,
 void HttpServer::record_request_failure(const RequestLogContext& context,
                                         const RequestFailure& failure) {
     metrics_.failed(failure.classification == RequestFailureClass::ClientDisconnected);
-    slots_.finish(context.id, std::nullopt);
     request_jsonl_.write_request_error(context, failure.machine_message);
     operational_log_.request_failure(context, failure);
 }
