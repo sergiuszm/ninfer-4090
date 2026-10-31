@@ -415,6 +415,12 @@ perf rework and its `SharedCandidateEvidence` fields; `88fac6c1` ports its
 `76b5370bd`. `49ab6e92` is a fork-local test geometry fix: on the Qwen3.8 artifact the
 `host_restore` pressure request did not displace the retained checkpoints, so it now fills
 `max_context`. It is an upstream test issue.
+`f4041033` is a fork-local follow-up found in the backport review, and upstream `neroued/dev`
+has the same gap. A new catalog segment can take the metadata that the State destination needs.
+Cancelling the points returns that metadata, and the State quote is then ready again. The
+reservation now re-assesses the State after cancelling the points: ready means `Unavailable`
+(skip), anything else `NeedsContext`. Keep `f4041033` until upstream has an equivalent; it is an
+upstream PR candidate.
 
 Stage 4 serve line, stages 5 and 6 serve items (on `1882c6ad`, 2026-10-31). The production line
 is in [rtx4090-serve-line.md](rtx4090-serve-line.md):
