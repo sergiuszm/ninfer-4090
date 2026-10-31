@@ -849,7 +849,7 @@ OpenAIChatRequest parse_chat_completion_request(const Json& body, const RequestL
     if (body.contains("response_format") && !body["response_format"].is_null())
         parse_json_output_format(body["response_format"], output.generation, "response_format",
                                  JsonFormatProtocol::Chat);
-    parse_structured_outputs(body, output.generation);
+    parse_structured_outputs(body, output.generation, limits.default_tool_constraints);
     apply_openai_prompt_cache_policy(output.generation, cache_policy);
     return output;
 }

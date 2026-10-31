@@ -93,6 +93,11 @@ std::string render_tool_definition(const ToolDefinition& tool) {
 
 } // namespace
 
+RequestLimits request_limits(const product::ServeOptions& server) {
+    return {.default_max_tokens       = server.launch.generation.max_tokens,
+            .default_tool_constraints = server.tool_constraints};
+}
+
 PromptOptionInputs collect_prompt_options(const GenerationRequest& request,
                                           const product::ServeOptions& server) {
     using Json  = RequestJson;

@@ -24,7 +24,8 @@ enum class JsonFormatProtocol { Chat, Responses, Anthropic };
 void parse_json_output_format(const RequestJson& format, GenerationRequest& request,
                               const std::string& param, JsonFormatProtocol protocol);
 
-void parse_structured_outputs(const RequestJson& body, GenerationRequest& request);
+void parse_structured_outputs(const RequestJson& body, GenerationRequest& request,
+                              ToolConstraintMode default_tool_constraints);
 
 [[nodiscard]] bool valid_tool_name(std::string_view name, std::size_t maximum_length) noexcept;
 

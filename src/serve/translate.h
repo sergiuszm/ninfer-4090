@@ -23,6 +23,10 @@ struct PromptOptionInputs {
     PromptDefaults defaults;
 };
 
+// Server-side parsing context: the output budget and tool constraints that apply when a request
+// omits them.
+RequestLimits request_limits(const product::ServeOptions& server);
+
 PromptOptionInputs collect_prompt_options(const GenerationRequest& req,
                                           const product::ServeOptions& server);
 

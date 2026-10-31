@@ -109,7 +109,9 @@ void parse_json_output_format(const RequestJson& format, GenerationRequest& requ
                    schema_param + ".schema");
 }
 
-void parse_structured_outputs(const RequestJson& body, GenerationRequest& request) {
+void parse_structured_outputs(const RequestJson& body, GenerationRequest& request,
+                              ToolConstraintMode default_tool_constraints) {
+    request.tool_choice.constraints = default_tool_constraints;
     if (body.contains("tool_constraints") && !body["tool_constraints"].is_null()) {
         if (!body["tool_constraints"].is_string())
             bad_request("tool_constraints must be auto or basic", "tool_constraints");

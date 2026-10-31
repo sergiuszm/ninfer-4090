@@ -46,6 +46,8 @@ private:
 // Server-side context needed while parsing/validating a request.
 struct RequestLimits {
     std::uint32_t default_max_tokens = 8192;
+    // Applies when the body has no tool_constraints field.
+    ToolConstraintMode default_tool_constraints = ToolChoice{}.constraints;
 };
 
 enum class ContentKind {

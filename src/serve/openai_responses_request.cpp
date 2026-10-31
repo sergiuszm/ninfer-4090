@@ -1251,7 +1251,7 @@ OpenAIResponsesCreateRequest parse_openai_responses_create_request(const Json& b
         out.requested_max_output_tokens  = *max_output;
         out.prompt.generation.max_tokens = *max_output;
     }
-    parse_structured_outputs(body, out.prompt.generation);
+    parse_structured_outputs(body, out.prompt.generation, limits.default_tool_constraints);
     return out;
 }
 
