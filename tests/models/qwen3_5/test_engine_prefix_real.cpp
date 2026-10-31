@@ -2195,6 +2195,13 @@ int main() {
         std::cout << "skip: NINFER_TEST_ARTIFACT is not set\n";
         return 77;
     }
+    // Fork-local (PR #15): reject an unknown prefill mode before any engine starts.
+    try {
+        (void)prefill_activations_under_test();
+    } catch (const std::invalid_argument& error) {
+        std::cerr << error.what() << '\n';
+        return 1;
+    }
     const char* selected            = std::getenv("NINFER_PREFIX_REAL_SCENARIO");
     const std::string_view scenario = selected ? selected : "all";
     int result                      = 0;
