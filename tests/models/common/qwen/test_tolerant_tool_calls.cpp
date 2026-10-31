@@ -318,31 +318,32 @@ int test_fork_prose_around_calls() {
     const Decoded t = run(failures, "trailing", bash_contract(), trailing);
     failures +=
         check(recovered(t, 1, Reason::TrailingContent) && argument(t, 0, "command") == "ls" &&
-                  t.content == "Done, that lists the directory.",
-              "trailing prose was not kept as content: " + t.content);
+                  t.content.empty() && t.diagnostics.dropped_trailing_bytes == 31,
+              "trailing prose was not dropped: " + t.content);
 
-    // The whitespace held back before the first call separates the trailing prose.
+    // Prose after the last call is dropped; prose before it stays.
     const Decoded spaced = run(failures, "separator", bash_contract(),
                                "Running the tests.\n" + ls + "\nDone, waiting for output.");
-    failures += check(complete(spaced) == 1 &&
-                          spaced.content == "Running the tests.\nDone, waiting for output.",
-                      "trailing prose lost its separator: " + spaced.content);
+    failures += check(complete(spaced) == 1 && spaced.content == "Running the tests." &&
+                          spaced.diagnostics.dropped_trailing_bytes == 25,
+                      "prose before the call changed: " + spaced.content);
     const Decoded glued =
         run(failures, "glued", bash_contract(), "Running the tests." + ls + "Done.");
-    failures += check(complete(glued) == 1 && glued.content == "Running the tests.Done.",
-                      "glued trailing prose changed: " + glued.content);
+    failures += check(complete(glued) == 1 && glued.content == "Running the tests.",
+                      "glued prose before the call changed: " + glued.content);
     const Decoded noted =
         run(failures, "noted", bash_contract(),
             "Note: <tool_call> is the marker.\n" +
                 tool_call("bash", {{"command", "echo '</parameter>'"}}) + "\nThat is all.");
     failures +=
         check(complete(noted) == 1 && argument(noted, 0, "command") == "echo '</parameter>'" &&
-                  noted.content == "Note: <tool_call> is the marker.\nThat is all.",
+                  noted.content == "Note: <tool_call> is the marker.",
               "decoder content around a quoted marker was wrong: " + noted.content);
 
     // A stray duplicate close after a complete call is dropped.
     const Decoded stray = run(failures, "stray close", bash_contract(), ls + "\n</tool_call>");
-    failures += check(recovered(stray, 1, Reason::TrailingContent) && stray.content.empty(),
+    failures += check(recovered(stray, 1, Reason::TrailingContent) && stray.content.empty() &&
+                          stray.diagnostics.dropped_trailing_bytes == 12,
                       "a stray </tool_call> became content: " + stray.content);
     return failures;
 }
@@ -427,7 +428,7 @@ int test_review_never_runs_a_quoted_call() {
                            "Here is the format:\n" + inner + "\nThat deletes the build dir.");
     failures += check(recovered(a4, 1, Reason::TrailingContent) &&
                           argument(a4, 0, "command") == "rm -rf build" &&
-                          a4.content == "Here is the format:\nThat deletes the build dir.",
+                          a4.content == "Here is the format:",
                       "the documented residual case changed");
 
     // A value that opens an unclosed <function= cannot take a later close.
@@ -453,7 +454,7 @@ int test_review_limit_and_call_end() {
     const Decoded stop = run(failures, "B2 stop", contract, b2);
     failures += check(recovered(stop, 1, Reason::TrailingContent) &&
                           argument(stop, 0, "content") == "# How a call ends\nA call ends with:" &&
-                          stop.content == "and then the",
+                          stop.content.empty() && stop.diagnostics.dropped_trailing_bytes == 12,
                       "control: the same text at the model stop should recover");
     // A complete strict call at the limit stays complete.
     const Decoded g3 = run(failures, "G3", contract, tool_call("run_shell", {{"command", "ctest"}}),
@@ -856,6 +857,130 @@ int test_holds() {
     return failures;
 }
 
+// ---- Review 1 of the re-port ----
+
+int test_review1_cases() {
+    int failures        = 0;
+    const auto contract = agent_contract();
+
+    // F1: closes not followed by structure do not use the attempt budget (production never tried
+    // them), so a file with many of them recovers.
+    std::string lines;
+    for (int i = 0; i < 80; ++i) lines += "<parameter>x</parameter> ok\n";
+    const Decoded many = run(failures, "F1", contract,
+                             tool_call("write_file", {{"path", "a.md"}, {"content", lines}}));
+    failures += check(recovered(many, 1, Reason::MalformedStructure) &&
+                          argument(many, 0, "content") == lines,
+                      "80 quoted closes exhausted the attempt budget");
+
+    // F2: nested closes followed by a quoted call end; the run() helper checks every chunking.
+    for (const int n : {1, 10, 64}) {
+        std::string body;
+        for (int i = 0; i < n; ++i) body += "<parameter=x>\n";
+        for (int i = 0; i < n; ++i)
+            body += "q</parameter>\n</function>\n</tool_call>\ndoc </tool_call>\n";
+        body += "bal</parameter> text\nend";
+        const Decoded out = run(failures, "F2 n=" + std::to_string(n), contract,
+                                tool_call("write_file", {{"path", "a.md"}, {"content", body}}));
+        failures += check(!out.failed && argument(out, 0, "content") == body,
+                          "F2 nested quoted ends were not recovered, n=" + std::to_string(n));
+    }
+
+    // F3: whitespace after a waiting candidate is scanned once, also when fed byte by byte.
+    {
+        const std::string text = "<tool_call>\n<function=run_shell>\n<parameter=command>\nls\n"
+                                 "</parameter>" +
+                                 std::string(200 * 1024, ' ') + "\n</function>\n</tool_call>";
+        const auto begin   = std::chrono::steady_clock::now();
+        const Decoded out  = decode(contract, text, 1, true, FinishReason::StopToken);
+        const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                 std::chrono::steady_clock::now() - begin)
+                                 .count();
+        failures +=
+            check(complete(out) == 1 && elapsed < 1000,
+                  "200 KB of whitespace after a close took " + std::to_string(elapsed) + " ms");
+    }
+
+    // F6: prose that names </tool_call> after a call and then a real call fails, as in strict mode.
+    const std::string ls    = tool_call("run_shell", {{"command", "ls"}});
+    const std::string ctest = tool_call("run_shell", {{"command", "ctest"}});
+    failures +=
+        check(run(failures, "S1", contract,
+                  ls + "\nThe block above ends with </tool_call>. Next I run the tests.\n" + ctest)
+                  .failed,
+              "a value swallowed prose and a later call");
+
+    // F7: recovered_from names only a recovery that completed a call; a skipped marker followed
+    // by a call is not reported as text.
+    const Decoded s2 = run(failures, "S2", contract,
+                           ls + "\n<tool_call>\n<function=run_shell>\n<parameter=command>\n"
+                                "grep '</parameter>' a and more",
+                           true, FinishReason::OutputLimit);
+    failures += check(!s2.failed && complete(s2) == 1 && s2.calls.size() == 2 &&
+                          s2.diagnostics.recovered_from == Reason::None,
+                      "an incomplete recovered call was reported as recovered");
+    const Decoded s3 = run(failures, "S3", contract,
+                           "Use <tool_call> tags.\n<tool_call>\n<function=run_shell>\n"
+                           "<parameter=command>\nls -la",
+                           true, FinishReason::OutputLimit);
+    failures += check(!s3.failed && s3.calls.size() == 1 && complete(s3) == 0 &&
+                          s3.diagnostics.fallback_reason == Reason::None &&
+                          s3.diagnostics.recovered_from == Reason::None,
+                      "a skipped marker before a returned call was reported as text");
+
+    // S4: only whitespace before the call; the trailing prose is dropped.
+    const Decoded s4 = run(failures, "S4", contract, "\n\n" + ls + "\nDone.");
+    failures += check(recovered(s4, 1, Reason::TrailingContent) && s4.content.empty() &&
+                          s4.diagnostics.dropped_trailing_bytes == 5,
+                      "S4 trailing prose was not dropped");
+    // S5: a JSON-typed value cannot hold a bare close: the request fails (production returned a
+    // schema-mismatched string).
+    failures += check(run(failures, "S5", contract,
+                          "<tool_call>\n<function=run_shell>\n<parameter=command>\nls\n"
+                          "</parameter>\n<parameter=timeout_s>\n30 </parameter> x\n</parameter>\n"
+                          "</function>\n</tool_call>")
+                          .failed,
+                      "a JSON value quoting a close was recovered");
+    // S6: a stray close between calls fails, as in production.
+    failures += check(run(failures, "S6", contract, ls + "\n</function>\n" + ctest).failed,
+                      "a stray close between calls was recovered");
+    // S7: a quoted nested block and prose naming </tool_call> after the call.
+    failures += check(run(failures, "S7", contract,
+                          "<tool_call>\n<function=write_file>\n<parameter=content>\n<parameter=a>\n"
+                          "x\n</parameter>\n</function>\n</tool_call>\nmore\n</parameter>\n"
+                          "</function>\n</tool_call>\nI used </tool_call> above.")
+                          .failed,
+                      "S7 was recovered");
+    return failures;
+}
+
+// F5: a continuation prefix that already holds a complete call is rejected, as in strict mode.
+int test_review1_continuation() {
+    int failures             = 0;
+    const std::string prefix = tool_call("run_shell", {{"command", "rm -rf build"}});
+    for (const bool tolerant : {false, true}) {
+        bool rejected = false;
+        try {
+            fi::ToolCallOutputDecoder decoder(agent_contract(), 64, false, tolerant);
+            decoder.initialize_continuation(prefix);
+        } catch (const ninfer::RequestError&) { rejected = true; }
+        failures += check(rejected, std::string("a complete call in the continuation prefix was "
+                                                "accepted, tolerant=") +
+                                        (tolerant ? "1" : "0"));
+    }
+    // A prefix that ends inside a value stays a valid continuation.
+    fi::ToolCallOutputDecoder decoder(agent_contract(), 64, false, true);
+    const std::string open = "<tool_call>\n<function=run_shell>\n<parameter=command>\necho '</para";
+    decoder.initialize_continuation(open);
+    (void)decoder.feed("meter>'\n</parameter>\n</function>\n</tool_call>");
+    (void)decoder.finish();
+    const auto calls = decoder.take_tool_calls();
+    failures += check(!decoder.error() && calls.size() == 1 &&
+                          Json::parse(calls[0].arguments_json)["command"] == "echo '</parameter>'",
+                      "a continuation inside a value was not completed");
+    return failures;
+}
+
 } // namespace
 
 int main() {
@@ -871,6 +996,8 @@ int main() {
     failures += test_harness_costs();
     failures += test_real_output_replay();
     failures += test_holds();
+    failures += test_review1_cases();
+    failures += test_review1_continuation();
     if (failures == 0) std::cout << "ok\n";
     return failures == 0 ? 0 : 1;
 }
