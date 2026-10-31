@@ -1,6 +1,6 @@
 status	our_path	upstream	disposition	fork_commits
 modified-in-place	.gitignore	.gitignore	0 carried 26a1722d	09a93fd4
-modified-in-place	CMakeLists.txt	CMakeLists.txt	1 B5 MSVC, B1, B2/B5 3090 base	cb2df08a 1eef8d83 0d2d4a5a 09a93fd4
+modified-in-place	CMakeLists.txt	CMakeLists.txt; cmake/NinferPlatform.cmake (target system)	1 B1 done (rtx5090 source set pinned to sm_89, dgx_spark refused), B2 global NINFER_SM86 done; open: 1 B5 MSVC flags	cb2df08a 1eef8d83 0d2d4a5a 09a93fd4
 modified-in-place	Dockerfile	Dockerfile	0 carried 26a1722d	ff925039
 fork-new	VERSION	VERSION  [dir GONE upstream]	0 carried f9a339f1	7e59d987 e271cc83 09a93fd4
 modified-in-place	apps/cli/main.cpp	apps/cli/main.cpp	2 K1 E8 root, K1 E8, K1 rk4v4, K1 rk8v4; 4 R10, R12	77bca849 0c3d2bee 816fe3fe 5df406b0 5db12fac 7c2ce91e

@@ -21,6 +21,9 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CUDA_STANDARD 20)
 set(CMAKE_CUDA_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)        # clangd / IDE tooling
+# Every target sees the sm_89 switch: kernels (PDL off, TMA routes on cp.async), model startup
+# (compute capability 8.9, no NVFP4/K8V4 KV), weight policies (A16 only) and tests.
+add_compile_definitions(NINFER_SM86=1)
 if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE Release)
 endif()

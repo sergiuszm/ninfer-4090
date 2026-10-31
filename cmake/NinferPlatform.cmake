@@ -11,13 +11,14 @@ endif()
 set(NINFER_TARGET_RTX5090 0)
 set(NINFER_TARGET_SPARK 0)
 if(NINFER_TARGET STREQUAL "rtx5090")
+  # This fork (rtx4090-port) builds the rtx5090 source set for sm_89 on purpose: the target
+  # directories, CPU executor and expert offload of the discrete x86 GPU. Kernels and policies
+  # that need sm_90 or later are guarded by NINFER_SM86 and __CUDA_ARCH__, not by another target.
   set(NINFER_TARGET_RTX5090 1)
-  set(NINFER_CUDA_ARCHITECTURE 120a)
+  set(NINFER_CUDA_ARCHITECTURE 89)
   set(NINFER_PROCESSOR_PATTERN "^(x86_64|amd64|AMD64)$")
 elseif(NINFER_TARGET STREQUAL "dgx_spark")
-  set(NINFER_TARGET_SPARK 1)
-  set(NINFER_CUDA_ARCHITECTURE 121a)
-  set(NINFER_PROCESSOR_PATTERN "^(aarch64|arm64|ARM64)$")
+  message(FATAL_ERROR "NInfer-4090 builds only the rtx5090 source set for sm_89")
 else()
   message(FATAL_ERROR "Unknown NINFER_TARGET '${NINFER_TARGET}'")
 endif()
