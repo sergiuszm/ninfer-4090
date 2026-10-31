@@ -22,10 +22,11 @@ const SplitShape& select(ProjectionProfile weights, const auto& rows) {
     if (!valid_linear_policy(weights.first.policy))
         throw std::invalid_argument("linear_split: invalid activation permission");
     if (weights.second) {
+        if (weights.second->policy != weights.first.policy)
+            throw std::invalid_argument("linear_split: paired weights require one permission");
         if (weights.first.qtype != QType::Q4_G64_FP16 ||
-            weights.second->qtype != QType::Q5_G64_FP16 ||
-            weights.first.policy != LinearPolicy::A16Only)
-            throw std::invalid_argument("linear_split: paired weights require Q4/Q5 A16");
+            weights.second->qtype != QType::Q5_G64_FP16)
+            throw std::invalid_argument("linear_split: paired weights require Q4/Q5");
         const std::array shapes{&kQ4Q5SplitN7168N7168K5120, &kQ4Q5SplitN4096N12288K5120};
         return match(shapes, weights, rows);
     }
