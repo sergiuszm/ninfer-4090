@@ -15,6 +15,7 @@ enum class Field {
     Device,
     MaxContext,
     KvDtype,
+    PrefillActivations,
     ContextCapacity,
     MemoryHeadroom,
     PrefillChunk,
