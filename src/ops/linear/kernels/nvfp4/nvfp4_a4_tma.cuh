@@ -161,7 +161,12 @@ __launch_bounds__(Schedule::kThreads, Schedule::kMinBlocksPerSm) void nvfp4_a4_t
 
     if (threadIdx.x < Schedule::kProducerThreads) {
         if constexpr (Schedule::kProducerThreads == 128) {
+#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ < 900
+            // Fork-local: setmaxnreg needs sm_90. sm_89 binds NVFP4 weights as A16.
+            __trap();
+#else
             asm volatile("setmaxnreg.dec.sync.aligned.u32 40;" : : : "memory");
+#endif
         }
         if (threadIdx.x == 0) {
 #pragma unroll 1
@@ -218,7 +223,11 @@ __launch_bounds__(Schedule::kThreads, Schedule::kMinBlocksPerSm) void nvfp4_a4_t
     }
 
     if constexpr (Schedule::kProducerThreads == 128) {
+#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ < 900
+        __trap();
+#else
         asm volatile("setmaxnreg.inc.sync.aligned.u32 232;" : : : "memory");
+#endif
     }
     auto& tensors             = shared.scratch.tensors;
     const int consumer_thread = static_cast<int>(threadIdx.x) - Schedule::kProducerThreads;
