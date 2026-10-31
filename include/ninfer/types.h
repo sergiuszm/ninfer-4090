@@ -404,7 +404,8 @@ struct ToolCallParseDiagnostics {
     std::uint32_t schema_mismatch_arguments     = 0;
     ToolCallParseFallbackReason fallback_reason = ToolCallParseFallbackReason::None;
     // Tolerant tool calls: the strict failure that a completed response recovered from, and the
-    // non-whitespace bytes after the last call that were dropped instead of returned as content.
+    // size of the trimmed text after the last call (close markers included) that was dropped
+    // instead of returned as content.
     ToolCallParseFallbackReason recovered_from = ToolCallParseFallbackReason::None;
     std::uint32_t dropped_trailing_bytes       = 0;
 
