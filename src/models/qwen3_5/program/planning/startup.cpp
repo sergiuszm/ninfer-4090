@@ -594,6 +594,22 @@ void validate_target_options(const execution::ModelProfile& profile, DeviceConte
         throw std::invalid_argument(
             "fp8 KV-cache storage requires compute capability 12.0 (block-scaled FP8 MMA)");
     }
+    // The NVFP4 expert routes use block-scaled E2M1 MMA (sm_120a), which traps on sm_89. The
+    // loader's A16Only policy does not avoid it, so refuse artifacts with NVFP4 experts here.
+    const auto nvfp4_experts = [](const execution::FfnProfile& ffn) {
+        const auto* moe = std::get_if<execution::MoeLayerProfile>(&ffn);
+        if (!moe) return false;
+        const auto& routed = moe->math.routed.ffn;
+        const auto& shared = moe->math.shared;
+        return routed.gate_up_type == QType::NVFP4 || routed.down_type == QType::NVFP4 ||
+               shared.gate_up_type == QType::NVFP4 || shared.down_type == QType::NVFP4;
+    };
+    bool nvfp4 = profile.mtp && nvfp4_experts(profile.mtp->ffn);
+    for (const auto& block : profile.text.layers) nvfp4 = nvfp4 || nvfp4_experts(block.ffn);
+    if (nvfp4) {
+        throw std::invalid_argument(
+            "NVFP4 MoE experts require compute capability 12.0 (block-scaled E2M1 MMA)");
+    }
 #else
     if (device.compute_capability() != 120) {
         throw std::invalid_argument("Qwen3.5 family runtime requires compute capability 12.0");
