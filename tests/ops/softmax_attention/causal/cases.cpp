@@ -445,6 +445,6 @@ void add_cases(OpSuite& suite) {
     for (auto storage : {KvCacheStorage::BFloat16, KvCacheStorage::Int8Group64,
                          KvCacheStorage::Fp8E4m3fnGroup128Ue8m0, KvCacheStorage::Nvfp4Group16,
                          KvCacheStorage::Fp8KeyNvfp4Value})
-        add_storage_cases(suite, storage);
+        if (kv_cache_storage_runs_on_target(storage)) add_storage_cases(suite, storage);
 }
 } // namespace ninfer::test::causal_attention

@@ -13,6 +13,22 @@
 #include <thread>
 
 namespace ninfer::test {
+namespace {
+#if defined(NINFER_SM86)
+// Fork-local (rtx4090-port): a case tagged a8 or a4 launches a route that sm_89 lacks. A case
+// tagged with all three policies is a host-side workspace contract sweep and still runs.
+bool sm89_unsupported_policy(const OpCase& test) {
+    bool a16 = false, a8 = false, a4 = false;
+    for (const auto& [name, value] : test.tags) {
+        if (name != "policy") continue;
+        a16 = a16 || value == "a16";
+        a8  = a8 || value == "a8";
+        a4  = a4 || value == "a4";
+    }
+    return (a8 || a4) && !(a16 && a8 && a4);
+}
+#endif
+} // namespace
 
 void OpSuite::add(std::string id, std::function<int()> run,
                   std::vector<std::pair<std::string, std::string>> tags) {
@@ -78,7 +94,7 @@ int OpSuite::main(int argc, char** argv) const {
 
         std::set<std::string> ids;
         std::vector<std::vector<std::size_t>> selected(groups_.size());
-        std::size_t count = 0;
+        std::size_t count = 0, unsupported = 0;
         for (std::size_t g = 0; g < groups_.size(); ++g) {
             for (std::size_t c = 0; c < groups_[g].cases.size(); ++c) {
                 const auto& test = groups_[g].cases[c];
@@ -93,10 +109,22 @@ int OpSuite::main(int argc, char** argv) const {
                             });
                     });
                 if (!matches) continue;
+#if defined(NINFER_SM86)
+                // Fork-local (rtx4090-port): sm_89 has no A8 (TMA) or A4 (E2M1 block-scale MMA)
+                // route; the loader binds those weights as A16, so cases that launch them skip.
+                if (sm89_unsupported_policy(test)) {
+                    ++unsupported;
+                    continue;
+                }
+#endif
                 selected[g].push_back(c);
                 ++count;
                 if (list) std::cout << test.id << '\n';
             }
+        }
+        if (!count && unsupported) {
+            std::cout << "SKIP: " << unsupported << " selected cases need A8 or A4 (sm_89)\n";
+            return 77;
         }
         if (!count) throw std::invalid_argument("no declared cases match the filters");
         if (list) return 0;
@@ -128,7 +156,8 @@ int OpSuite::main(int argc, char** argv) const {
         std::cout << (failures           ? "FAIL "
                       : skipped == count ? "SKIP "
                                          : "OK ")
-                  << count - skipped << " cases, " << skipped << " skipped, " << seconds << " s\n";
+                  << count - skipped << " cases, " << skipped + unsupported << " skipped, "
+                  << seconds << " s\n";
         return failures ? 1 : skipped == count ? 77 : 0;
     } catch (const std::exception& error) {
         std::cerr << error.what() << '\n';
