@@ -519,6 +519,7 @@ std::string format_server_start_json(const std::string& server_instance_id, std:
                                       ? Json(*options.launch.generation.enable_thinking)
                                       : Json(nullptr)},
              {"default_thinking_budget", std::move(default_thinking_budget)},
+             {"thinking_control_tokens", load.thinking_control_tokens},
              {"default_preserve_thinking", options.launch.generation.preserve_thinking
                                                ? Json(*options.launch.generation.preserve_thinking)
                                                : Json(nullptr)}};

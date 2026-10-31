@@ -59,6 +59,8 @@ build_distributed_model(const artifact::Reader& reader, EngineOptions& options,
     load.prefill_signature   = setup.prefill_signature(options.prefill_chunk);
     load.artifact_bytes_read = setup.definition()->resource_stats().read_bytes;
     load.host_object_count   = setup.definition()->resource_stats().host_object_count;
+    load.thinking_control_tokens =
+        static_cast<std::uint32_t>(setup.definition()->resources().text.control_tokens->size());
     std::string hardware;
     for (const auto& report : prepared.reports) {
         load.artifact_bytes_read += report.read_bytes;
