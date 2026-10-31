@@ -51,7 +51,9 @@ std::int32_t snapshot_sample_count(std::int32_t tokens, bool full_reference = fa
 }
 
 // A capture that throws is ended before the exception leaves, so the stream does not keep
-// capturing and fail every later allocation in the process.
+// capturing and fail every later allocation in the process. A CUDA call that failed during the
+// capture leaves its error (and the invalidated capture) as the last error; clear it, or the next
+// CUDA_CHECK(cudaGetLastError()) of a later case aborts the process.
 template <class Work>
 cudaGraph_t capture_graph(cudaStream_t stream, Work&& work) {
     CUDA_CHECK(cudaStreamBeginCapture(stream, cudaStreamCaptureModeGlobal));
@@ -61,6 +63,7 @@ cudaGraph_t capture_graph(cudaStream_t stream, Work&& work) {
         cudaGraph_t partial = nullptr;
         if (cudaStreamEndCapture(stream, &partial) == cudaSuccess && partial)
             (void)cudaGraphDestroy(partial);
+        (void)cudaGetLastError();
         throw;
     }
     cudaGraph_t captured = nullptr;
@@ -377,11 +380,12 @@ int run_batched_case(std::string_view label, std::int32_t hidden, std::int32_t v
                q, k, v, z_output, workspace, execution);
     };
     if (graph) {
-        cudaStream_t stream;
         cudaGraph_t captured;
         cudaGraphExec_t executable;
         cuda_synchronize();
-        CUDA_CHECK(cudaStreamCreateWithFlags(&stream, cudaStreamNonBlocking));
+        // Owned, so a throwing capture does not leak the stream.
+        const CudaStream owned_stream(cuda_environment().context);
+        const cudaStream_t stream = owned_stream.stream();
         // The view queries the stream's device, which a capturing stream rejects.
         const auto stream_execution = cuda_environment().context.execution_view(stream);
         captured = capture_graph(stream, [&] { invoke(stream_execution); });
@@ -403,7 +407,6 @@ int run_batched_case(std::string_view label, std::int32_t hidden, std::int32_t v
         CUDA_CHECK(cudaStreamSynchronize(stream));
         CUDA_CHECK(cudaGraphExecDestroy(executable));
         CUDA_CHECK(cudaGraphDestroy(captured));
-        CUDA_CHECK(cudaStreamDestroy(stream));
     } else {
         invoke(cuda_environment().default_execution);
         cuda_synchronize();
@@ -689,11 +692,12 @@ int run_q8_case(DevicePackedWeight& parent, std::int32_t tokens, std::int32_t in
             {source, conv_state, snapshot_base}, Tensor{}, {q, k, v, z_output}, workspace, cuda);
     };
     if (graph) {
-        cudaStream_t stream;
         cudaGraph_t captured;
         cudaGraphExec_t executable;
         cuda_synchronize();
-        CUDA_CHECK(cudaStreamCreateWithFlags(&stream, cudaStreamNonBlocking));
+        // Owned, so a throwing capture does not leak the stream.
+        const CudaStream owned_stream(ninfer::test::cuda_environment().context);
+        const cudaStream_t stream = owned_stream.stream();
         const auto stream_execution =
             ninfer::test::cuda_environment().context.execution_view(stream);
         captured = capture_graph(stream, [&] { launch(stream_execution); });
@@ -711,7 +715,6 @@ int run_q8_case(DevicePackedWeight& parent, std::int32_t tokens, std::int32_t in
         CUDA_CHECK(cudaStreamSynchronize(stream));
         CUDA_CHECK(cudaGraphExecDestroy(executable));
         CUDA_CHECK(cudaGraphDestroy(captured));
-        CUDA_CHECK(cudaStreamDestroy(stream));
     } else {
         launch(cuda_environment().default_execution);
         cuda_synchronize();
