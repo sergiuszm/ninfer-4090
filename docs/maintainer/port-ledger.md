@@ -251,7 +251,18 @@ tokens) returned 200 with the correct count; one 3200x3200 image (10,000 tokens)
 remaining wall is the 32768 aggregate, about 39 such screenshots or 8 images at pi's
 2000x2000 resize cap in one conversation.
 
-## Upstream catch-up #4 (in progress): `neroued/master` `1882c6ad`
+## Upstream catch-up #4 (deployed 2026-10-31, `deploy-c4b-fe4b4b724161`): `neroued/master` `1882c6ad`
+
+Deployed to production on 2026-10-31 18:50:34 UTC as `catchup4b` `fe4b4b72`, tag
+`deploy-c4b-fe4b4b724161` (see "Deploy" below). Follow-ups:
+
+- `--tolerant-tool-calls`: off at the deploy. The user decides about the flag after one or two
+  days of `invalid_tool_output` counts on the new line.
+- Upstream reports and PRs: the user decides which to send. Candidates are the `prefix_real` test
+  fixes `bb13087b` and `f0fbfdb0`, the capture fixes `f4041033` and `e6d965ff`, and the test
+  issues `late_instructions`, `explicit_anchor_branch` and `host_restore`.
+- Cleanup after one week on the new line: remove the stopped container `ninfer-qwen38-pre-c4b`
+  and decide about `~/ninfer-deploy/slots` on magnus.
 
 Started 2026-10-07 on branch `catchup4` from upstream `81c8ce09` (`master` and `dev` were the same
 commit). A merge into `rtx4090-port` is not practical: upstream replaced the context cache

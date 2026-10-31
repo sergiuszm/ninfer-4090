@@ -2,8 +2,8 @@
 
 This page is the serve line for the production Qwen3.8-27B server on the RTX 4090 (24 GB) after
 catch-up #4. It replaces the line of 2026-10-06 (binary `3a27f32d`), flag by flag. It is deployed
-since 2026-10-31 as package `c4b-fe4b4b724161` (port ledger, catch-up #4 "Deploy"). Values marked
-**MEASURE** are estimates. Read them from the first GPU boot and update this page.
+since 2026-10-31 as package `c4b-fe4b4b724161` (port ledger, catch-up #4 "Deploy"). The values
+that the line depends on are measured; see "Production readings".
 
 ## The line
 
@@ -52,8 +52,8 @@ the measurements below).
 | Old flag | New flag and value | Reason |
 |---|---|---|
 | model path, `--host`, `--port`, `--model-id`, `--max-context 262144` | unchanged | The artifact must be v3 |
-| `--kv-capacity 262144` (tokens) | `--context-capacity auto` | Upstream removed the token form (`2705a728`). The capacity is now bytes per rank, shared by KV and State. `auto` takes the largest capacity that fits after the headroom. **MEASURE**: the boot log shows the estimated token capacity (`e5e18b97`). It must be 262144 or more |
-| (none) | `--memory-headroom 256MiB` | The default is 512 MiB and applies to auto and explicit capacity (`6dd2b1b4`). The catch-up #4 stage 2 boot (explicit capacity, no headroom) left 226 MiB free. Upstream's RTX 5090 example uses 256 MiB. **MEASURE**: free VRAM after warmup |
+| `--kv-capacity 262144` (tokens) | `--context-capacity auto` | Upstream removed the token form (`2705a728`). The capacity is now bytes per rank, shared by KV and State. `auto` takes the largest capacity that fits after the headroom. Measured: 285,274 tokens at the production line, more than 262144, so `auto` stays |
+| (none) | `--memory-headroom 256MiB` | The default is 512 MiB and applies to auto and explicit capacity (`6dd2b1b4`). The catch-up #4 stage 2 boot (explicit capacity, no headroom) left 226 MiB free. Upstream's RTX 5090 example uses 256 MiB. Measured: 286 MiB free after boot and 284 MiB after a 128K prefill, so 256 MiB stays |
 | `--max-concurrency 2`, `--max-pending-requests 16`, `--prefill-chunk 1024` | unchanged | |
 | `--kv-dtype rk4v4-e8` | unchanged | The fork KV mode, re-homed in stage 2 |
 | `--spec mtp --draft-tokens 3` | unchanged | |
@@ -73,7 +73,7 @@ the measurements below).
 
 | Flag | Default | Note |
 |---|---|---|
-| `--host-cache-capacity` | 8 GiB plus 8 State images | Same shape as the old host tier (8 GiB of host KV, 8 host State slots). The default is not keyed to the RTX 5090; it applies to every target with discrete memory. **MEASURE**: `engine.context_cache.host_capacity_bytes` in the `server_start` record against the host RAM. Window 3a: 9821569024 bytes (8 GiB plus 8 State blocks of 153954304 bytes) |
+| `--host-cache-capacity` | 8 GiB plus 8 State images | Same shape as the old host tier (8 GiB of host KV, 8 host State slots). The default is not keyed to the RTX 5090; it applies to every target with discrete memory. Measured: 9821569024 bytes (8 GiB plus 8 State blocks of 153954304 bytes) of the 27.3 GiB host RAM of magnus, so the default stays |
 | `--pending-timeout` | 30 s | A request that waits longer in the queue fails before its stream starts: 503 on Chat and Responses, 504 `timeout_error` on Messages (`45f74287`) |
 | `--stats-interval` | 5 s | Was `--log-stats-interval-ms` |
 | `--thinking-control` | model text | Not on the production line (fork PR #18) |
@@ -90,18 +90,21 @@ GPU window 1, 2026-10-31: the stage 1 tree on the RTX 4090, v3 artifact, `--kv-d
 | `--max-context 131072`, `auto`, `--memory-headroom 256MiB`, `--vision-memory-budget 512MiB` | Ready in about 6 s. Budget 23.1 GiB, runtime 5.85 GiB, device context 5.31 GiB, KV ~146959 tokens (1.1 contexts of 131072). Startup free 285.7 MiB (`cuda_free_bytes` 299565056); `nvidia-smi` shows 286 MiB free. Host context 9.15 GiB pinned (the default; the host has 28 GiB RAM) |
 | Vision at `--vision-memory-budget 512MiB` (same boot) | `budget_bytes` 536870912, `max_window_features` 8502, `encoder_workspace_bytes` 449756160, `output_capacity_bytes` 87060480 (10 KiB per feature), `input_staging_bytes` 105867264 |
 
-The production values need the same readings with `rk4v4-e8` at 262144.
+## Production readings
 
-## Values to measure on the first boot
+The production line (`rk4v4-e8`, INT8 prefill, 262144, 2 lanes, MTP 3, Vision 512 MiB, headroom
+256 MiB). Sources: GPU windows 3a and 3b on the merged tree `2c1ecd25`, the R14 check in window 4,
+and the deploy switch (`~/ninfer-deploy/rollback/switch.log` on magnus, 2026-10-31 18:50 UTC)
+with its `server_start` record. Read the values again when a flag of the line changes.
 
-| Value | Where to read it | Decides |
-|---|---|---|
-| Estimated context token capacity | boot log line `context \| device ... \| KV ~N tokens`, or `engine.context_token_capacity_estimate` in the `server_start` record of the request log | `--context-capacity`: keep `auto` if 262144 or more |
-| Free VRAM after warmup | `ninfer_cuda_memory_free_bytes` on `/metrics` | `--memory-headroom` |
-| `max_window_features` | `resources.ranks[0].resources.vision.max_window_features` in the `server_start` record of the request log | `--vision-memory-budget`: 8502 at 512 MiB (window 1). Read it again if the budget changes |
-| Host context cache | `engine.context_cache.host_capacity_bytes` in the `server_start` record of the request log | `--host-cache-capacity` |
-| Host reservation | `ninfer_memory_host_reservation_bytes` on `/metrics`: the media live capacity when Vision is on, else 0 (window 3a: 2147483648) | `--media-live-capacity` |
-| Context cost preset | `bench/context_cost` on the v3 artifact | the `--context-cost-presets` file |
+| Value | Where to read it | Reading | Source | Decides |
+|---|---|---|---|---|
+| Estimated context token capacity | boot log line `context \| device ... \| KV ~N tokens`, or `engine.context_token_capacity_estimate` in the `server_start` record of the request log | 285,274 tokens | windows 3a and 3b, switch.log | `--context-capacity auto` stays (262144 or more) |
+| Free VRAM | `ninfer_cuda_memory_free_bytes` on `/metrics`, or `nvidia-smi` | 299565056 bytes at startup; `nvidia-smi` 286 MiB free after boot (23,798 MiB used) and 284 MiB after a 128K prefill. The old line had 640 MiB | windows 3a and 3b, switch.log | `--memory-headroom 256MiB` stays |
+| `max_window_features` | `resources.ranks[0].resources.vision.max_window_features` in the `server_start` record of the request log | 8502 at 512 MiB, more than the old cap of 8192 | windows 1 and 3a, switch.log | `--vision-memory-budget 512MiB` stays |
+| Host context cache | `engine.context_cache.host_capacity_bytes` in the `server_start` record of the request log | 9821569024 bytes (8 GiB plus 8 State blocks of 153954304 bytes); magnus has 27.3 GiB RAM | window 3a, the production `server_start` | `--host-cache-capacity` stays at the default |
+| Host reservation | `ninfer_memory_host_reservation_bytes` on `/metrics`: the media live capacity when Vision is on, else 0 | 2147483648 bytes (the 2 GiB default) | window 3a | `--media-live-capacity` stays at the default |
+| Context cost preset | `engine.context_cost` in the `server_start` record | prefill and transfer sources external, `prefill_signature` `58642f67...b3c9`, `hardware_class` `nvidia-geforce-rtx-4090-sm89` | window 4 (R14), switch.log | `context_cost_presets_4090_int8.json` (R14) |
 
 ## Runtime image
 
