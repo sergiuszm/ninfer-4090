@@ -421,11 +421,12 @@ Cancelling the points returns that metadata, and the State quote is then ready a
 reservation now re-assesses the State after cancelling the points: ready means `Unavailable`
 (skip), anything else `NeedsContext`. Keep `f4041033` until upstream has an equivalent; it is an
 upstream PR candidate.
-`e6d965ff`, the same review, pre-existing upstream: with Host victims, the capture destination
-descriptor is reserved before the victims are released, and the Host assessment does not count
-it. A short descriptor or metadata budget threw out of `prepare_capture`, and the engine failed
-all requests. It now checks the two `reserve_metadata` conditions first and returns
-`NeedsContext`. Keep it until upstream has an equivalent; it is an upstream PR candidate.
+`e6d965ff` is a fork fix of an upstream bug (in `1882c6ad` and `neroued/dev`), found in the same
+review. With Host victims, the capture destination descriptor is reserved before the victims are
+released, and the Host assessment does not count it. A short descriptor or metadata budget threw out
+of `prepare_capture`, and the engine failed all requests. It now checks the two `reserve_metadata`
+conditions first and returns `NeedsContext`. Keep it until upstream has an equivalent. It is an
+upstream PR candidate; the user decides later whether to send it.
 
 Stage 4 serve line, stages 5 and 6 serve items (on `1882c6ad`, 2026-10-31). The production line
 is in [rtx4090-serve-line.md](rtx4090-serve-line.md):
