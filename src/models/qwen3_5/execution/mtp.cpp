@@ -227,7 +227,7 @@ void mtp_forward(MtpExecutionView state, const MtpInputs& inputs,
         auto mlp_scope = state.workspace.scope();
         if (const auto* dense = std::get_if<DenseParameters>(&parameters.ffn)) {
             dense_mlp(post.post_mixer_hidden, *dense, stem.residual, DenseMlpUse::Mtp,
-                      state.workspace, state.execution);
+                      BodyActivations{}, state.workspace, state.execution);
         } else {
             const auto& moe = std::get<moe::Parameters>(parameters.ffn);
             moe::execute(post.post_mixer_hidden, moe, moe.resident, ops::MoeEpilogue::AddResidual,

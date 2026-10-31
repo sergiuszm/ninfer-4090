@@ -5,9 +5,10 @@
 
 namespace ninfer::models::qwen3_5::execution {
 
-std::size_t gdn_projection_workspace_bytes(const GdnProfile& parameters, std::int32_t first,
+std::size_t gdn_projection_workspace_bytes(const GdnProfile& parameters,
+                                           BodyActivations activations, std::int32_t first,
                                            std::int32_t last) {
-    return ops::linear_split_workspace_capacity_bytes(parameters.projection,
+    return ops::linear_split_workspace_capacity_bytes(activations(parameters.projection),
                                                       parameters.projection_rows, first, last);
 }
 
@@ -23,10 +24,11 @@ std::size_t gdn_record_workspace_bytes(const GdnProfile& parameters, std::int32_
                                                                     first_width, last_width);
 }
 
-void gdn_projection(const Tensor& hidden, const GdnParameters& parameters, Tensor& qkv, Tensor& z,
-                    MemoryArena& workspace, CudaExecutionView execution) {
+void gdn_projection(const Tensor& hidden, const GdnParameters& parameters,
+                    BodyActivations activations, Tensor& qkv, Tensor& z, MemoryArena& workspace,
+                    CudaExecutionView execution) {
     std::array outputs{qkv, z};
-    ops::linear_split(hidden, parameters.projection, outputs, workspace, execution);
+    ops::linear_split(hidden, activations(parameters.projection), outputs, workspace, execution);
 }
 
 void gdn_norm_control(const Tensor& residual, const Tensor& norm, float epsilon,

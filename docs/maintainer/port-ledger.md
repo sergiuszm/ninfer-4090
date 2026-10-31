@@ -386,6 +386,13 @@ Gates:
   and cold prefill and decode comparisons against production must be repeated.
 - rk4v4 has no attention case; its INT4 keys share the rk4v4-e8 decode.
 
+Test goldens (2026-10-31): `2cbe488d` had two parts, the turn checkpoint ring test and the
+`prefix_real` prompt goldens. The file map dropped both with the ring. The goldens are carried
+again in `d9167962`: the maintained Qwen3.8 template adds its default `xhigh` reasoning system
+block, so a Qwen3.8 artifact renders a 58-token thinking prompt, and upstream's check accepts
+only the Qwen3.6 count (16). Keep the 16-or-58 check until upstream updates the golden. The ring
+test stays dropped.
+
 Stage 4 serve line, stages 5 and 6 serve items (on `1882c6ad`, 2026-10-31). The production line
 is in [rtx4090-serve-line.md](rtx4090-serve-line.md):
 

@@ -55,6 +55,19 @@ enum class ProposalHead : std::uint8_t {
     Optimized,
 };
 
+// Fork-local (PR #15): activation precision of the groupwise Q4/Q5 dense body in prompt prefill
+// and scoring. A16 keeps BF16 activations; Int8 permits group-64 INT8 activations there. Decode,
+// speculative verification and every other use keep their declared precision. Models without
+// such a body ignore it.
+enum class PrefillActivations : std::uint8_t {
+    A16,
+    Int8,
+};
+
+[[nodiscard]] constexpr const char* prefill_activations_name(PrefillActivations value) noexcept {
+    return value == PrefillActivations::Int8 ? "int8" : "a16";
+}
+
 struct SpeculativeOptions {
     SpeculativeBackend backend = SpeculativeBackend::None;
     // Startup-fixed K: MTP 1..5; DFlash and DFlash2 1..15 (query width K+1).
@@ -168,7 +181,8 @@ struct EngineOptions {
     // Zero uses 4096 for Qwen4Exp or CPU expert offload, otherwise 1024.
     std::uint32_t prefill_chunk = 0;
     MoeOptions moe;
-    KvCacheStorage kv_cache = KvCacheStorage::BFloat16;
+    KvCacheStorage kv_cache                = KvCacheStorage::BFloat16;
+    PrefillActivations prefill_activations = PrefillActivations::A16;
     SpeculativeOptions speculative;
     std::size_t media_cache_bytes = kDefaultMediaCacheBytes;
     std::size_t media_live_bytes  = kDefaultMediaLiveBytes;

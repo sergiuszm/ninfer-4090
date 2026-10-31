@@ -36,8 +36,21 @@ extern "C" cudaError_t CUDARTAPI cudaEventQuery(cudaEvent_t event) {
 
 namespace {
 
+// Fork-local (PR #15): NINFER_PREFIX_REAL_PREFILL_ACTIVATIONS=int8 builds every engine under test
+// with INT8 dense-body prefill, so the reuse against full-prefill greedy-equality checks cover the
+// lossy mode too. The default is a16, the product default.
+ninfer::PrefillActivations prefill_activations_under_test() {
+    const char* value = std::getenv("NINFER_PREFIX_REAL_PREFILL_ACTIVATIONS");
+    if (value == nullptr || *value == '\0') return ninfer::PrefillActivations::A16;
+    const std::string_view text(value);
+    if (text == "a16") return ninfer::PrefillActivations::A16;
+    if (text == "int8") return ninfer::PrefillActivations::Int8;
+    throw std::invalid_argument("NINFER_PREFIX_REAL_PREFILL_ACTIVATIONS must be a16 or int8");
+}
+
 ninfer::EngineOptions engine_options(const char* artifact) {
     ninfer::EngineOptions options;
+    options.prefill_activations       = prefill_activations_under_test();
     options.artifact_path             = artifact;
     options.max_context               = 4096;
     options.prefill_chunk             = 1024;
@@ -53,6 +66,7 @@ ninfer::EngineOptions engine_options(const char* artifact) {
 
 ninfer::EngineOptions host_restore_engine_options(const char* artifact) {
     ninfer::EngineOptions options;
+    options.prefill_activations       = prefill_activations_under_test();
     options.artifact_path             = artifact;
     options.max_context               = 512;
     options.prefill_chunk             = 256;
@@ -71,6 +85,7 @@ ninfer::EngineOptions host_restore_engine_options(const char* artifact) {
 
 ninfer::EngineOptions anthropic_prefix_regression_engine_options(const char* artifact) {
     ninfer::EngineOptions options;
+    options.prefill_activations       = prefill_activations_under_test();
     options.artifact_path             = artifact;
     options.max_context               = 2048;
     options.prefill_chunk             = 512;
@@ -91,6 +106,7 @@ ninfer::EngineOptions anthropic_prefix_regression_engine_options(const char* art
 
 ninfer::EngineOptions shared_rewrite_materialization_engine_options(const char* artifact) {
     ninfer::EngineOptions options;
+    options.prefill_activations               = prefill_activations_under_test();
     options.artifact_path                     = artifact;
     options.max_context                       = 100000;
     options.prefill_chunk                     = 1024;
@@ -107,6 +123,7 @@ ninfer::EngineOptions shared_rewrite_materialization_engine_options(const char* 
 
 ninfer::EngineOptions explicit_anchor_engine_options(const char* artifact) {
     ninfer::EngineOptions options;
+    options.prefill_activations               = prefill_activations_under_test();
     options.artifact_path                     = artifact;
     options.max_context                       = 512;
     options.prefill_chunk                     = 256;
@@ -120,6 +137,7 @@ ninfer::EngineOptions explicit_anchor_engine_options(const char* artifact) {
 
 ninfer::EngineOptions concurrent_engine_options(const char* artifact) {
     ninfer::EngineOptions options;
+    options.prefill_activations               = prefill_activations_under_test();
     options.artifact_path                     = artifact;
     options.max_context                       = 512;
     options.prefill_chunk                     = 256;
@@ -158,12 +176,13 @@ ninfer::PromptInput chinese_chat(bool enable_thinking) {
 }
 
 int exercise_artifact_frontend(const ninfer::Engine& engine) {
-    if (engine.count_tokens(chinese_chat(true)) != 16) {
-        std::cerr << "artifact tokenizer/chat template changed the thinking prompt golden\n";
-        return 1;
-    }
-    if (engine.count_tokens(chinese_chat(false)) != 18) {
-        std::cerr << "artifact tokenizer/chat template changed the no-thinking prompt golden\n";
+    // Fork-local (2cbe488d): Qwen3.6 artifacts render 16/18. The maintained Qwen3.8 template
+    // adds its default xhigh reasoning system block to the thinking prompt (58/18).
+    const std::uint32_t thinking    = engine.count_tokens(chinese_chat(true));
+    const std::uint32_t no_thinking = engine.count_tokens(chinese_chat(false));
+    if ((thinking != 16 && thinking != 58) || no_thinking != 18) {
+        std::cerr << "artifact tokenizer/chat template changed the prompt goldens: thinking="
+                  << thinking << " no_thinking=" << no_thinking << '\n';
         return 1;
     }
     return 0;
@@ -2083,6 +2102,7 @@ int exercise_attention_integration(const char* artifact) {
     const auto drafts = static_cast<std::uint32_t>(std::stoul(std::string(setting(
         "NINFER_TEST_DRAFT_TOKENS", backend == ninfer::SpeculativeBackend::Mtp ? "3" : "7"))));
     ninfer::EngineOptions options;
+    options.prefill_activations       = prefill_activations_under_test();
     options.artifact_path             = artifact;
     options.kv_cache                  = storage;
     options.max_context               = 65536;
@@ -2175,6 +2195,13 @@ int main() {
     if (!artifact || !*artifact) {
         std::cout << "skip: NINFER_TEST_ARTIFACT is not set\n";
         return 77;
+    }
+    // Fork-local (PR #15): reject an unknown prefill mode before any engine starts.
+    try {
+        (void)prefill_activations_under_test();
+    } catch (const std::invalid_argument& error) {
+        std::cerr << error.what() << '\n';
+        return 1;
     }
     const char* selected            = std::getenv("NINFER_PREFIX_REAL_SCENARIO");
     const std::string_view scenario = selected ? selected : "all";

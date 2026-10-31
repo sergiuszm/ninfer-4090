@@ -639,6 +639,11 @@ int main(int argc, char** argv) {
     using namespace ninfer::test::moe_block_scaled;
     OpSuite suite;
     for (bool fp8 : {false, true}) {
+#if defined(NINFER_SM86)
+        // Fork-local (rtx4090-port): NVFP4 experts need the block-scaled E2M1 MMA, which sm_89
+        // lacks; loading refuses them there, so only the FP8 cases are registered.
+        if (!fp8) continue;
+#endif
         add_shared320_cases(suite, fp8);
         const std::string format = fp8 ? "fp8" : "nvfp4";
         std::vector<OpCase> catalogue;

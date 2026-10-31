@@ -377,6 +377,10 @@ ParsedOptions parse(int argc, char** argv, EntryPoint entry,
         case Field::KvDtype:
             engine.kv_cache = kv_storage(string());
             break;
+        case Field::PrefillActivations:
+            engine.prefill_activations =
+                string() == "int8" ? PrefillActivations::Int8 : PrefillActivations::A16;
+            break;
         case Field::ContextCapacity:
             if (const auto* capacity = std::get_if<std::uint64_t>(&value)) {
                 engine.context_capacity = ContextCapacityPolicy::explicit_capacity(*capacity);

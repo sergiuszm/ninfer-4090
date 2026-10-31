@@ -31,6 +31,9 @@ struct MeasurementOptions {
     int transfer_warmup         = 2;
     int transfer_repetitions    = 9;
     int prefill_repetitions     = 5;
+    // Fork-local (PR #15): prefill activations of the measured engine. The preset is keyed by the
+    // engine's prefill signature, which distinguishes INT8 dense-body prefill.
+    PrefillActivations prefill_activations = PrefillActivations::A16;
 };
 
 struct TransferMeasurement {

@@ -50,6 +50,24 @@ std::int32_t snapshot_sample_count(std::int32_t tokens, bool full_reference = fa
     return tokens <= 4 ? 32 : 7;
 }
 
+// A capture that throws is ended before the exception leaves, so the stream does not keep
+// capturing and fail every later allocation in the process.
+template <class Work>
+cudaGraph_t capture_graph(cudaStream_t stream, Work&& work) {
+    CUDA_CHECK(cudaStreamBeginCapture(stream, cudaStreamCaptureModeGlobal));
+    try {
+        work();
+    } catch (...) {
+        cudaGraph_t partial = nullptr;
+        if (cudaStreamEndCapture(stream, &partial) == cudaSuccess && partial)
+            (void)cudaGraphDestroy(partial);
+        throw;
+    }
+    cudaGraph_t captured = nullptr;
+    CUDA_CHECK(cudaStreamEndCapture(stream, &captured));
+    return captured;
+}
+
 double silu_fp64(double value) {
     if (value >= 0.0) { return value / (1.0 + std::exp(-value)); }
     const double exponential = std::exp(value);
@@ -364,9 +382,9 @@ int run_batched_case(std::string_view label, std::int32_t hidden, std::int32_t v
         cudaGraphExec_t executable;
         cuda_synchronize();
         CUDA_CHECK(cudaStreamCreateWithFlags(&stream, cudaStreamNonBlocking));
-        CUDA_CHECK(cudaStreamBeginCapture(stream, cudaStreamCaptureModeGlobal));
-        invoke(cuda_environment().context.execution_view(stream));
-        CUDA_CHECK(cudaStreamEndCapture(stream, &captured));
+        // The view queries the stream's device, which a capturing stream rejects.
+        const auto stream_execution = cuda_environment().context.execution_view(stream);
+        captured = capture_graph(stream, [&] { invoke(stream_execution); });
         CUDA_CHECK(cudaGraphInstantiate(&executable, captured, nullptr, nullptr, 0));
         CUDA_CHECK(cudaGraphLaunch(executable, stream));
         CUDA_CHECK(cudaStreamSynchronize(stream));
@@ -678,9 +696,7 @@ int run_q8_case(DevicePackedWeight& parent, std::int32_t tokens, std::int32_t in
         CUDA_CHECK(cudaStreamCreateWithFlags(&stream, cudaStreamNonBlocking));
         const auto stream_execution =
             ninfer::test::cuda_environment().context.execution_view(stream);
-        CUDA_CHECK(cudaStreamBeginCapture(stream, cudaStreamCaptureModeGlobal));
-        launch(stream_execution);
-        CUDA_CHECK(cudaStreamEndCapture(stream, &captured));
+        captured = capture_graph(stream, [&] { launch(stream_execution); });
         CUDA_CHECK(cudaGraphInstantiate(&executable, captured, nullptr, nullptr, 0));
         CUDA_CHECK(cudaGraphLaunch(executable, stream));
         CUDA_CHECK(cudaStreamSynchronize(stream));

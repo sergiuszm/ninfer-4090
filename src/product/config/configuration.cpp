@@ -115,6 +115,9 @@ StartupConfigurationView view(const LaunchOptions& launch, EntryPoint entry, con
         case Field::KvDtype:
             value = std::string(kv_name(e.kv_cache));
             break;
+        case Field::PrefillActivations:
+            value = std::string(prefill_activations_name(e.prefill_activations));
+            break;
         case Field::ContextCapacity:
             if (e.context_capacity.mode == ContextCapacityMode::Automatic)
                 value = std::string("auto");

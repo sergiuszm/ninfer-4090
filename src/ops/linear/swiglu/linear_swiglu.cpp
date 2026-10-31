@@ -39,7 +39,7 @@ std::size_t linear_swiglu_workspace_capacity_bytes(QType qtype, std::int32_t gat
     if (qtype == QType::BF16) return 0;
     if (qtype == QType::Q8_G32_FP16) return 0;
     if (qtype == QType::Q4_G64_FP16) {
-        return detail::q4_linear_swiglu_capacity_workspace_bytes(gate_up_rows, input_rows,
+        return detail::q4_linear_swiglu_capacity_workspace_bytes(gate_up_rows, input_rows, policy,
                                                                  min_tokens, max_tokens);
     }
     if (qtype == QType::NVFP4) {
@@ -135,7 +135,7 @@ static void execute_swiglu(const Tensor& x, const Weight& gate_up_weight, Tensor
         detail::q8_linear_swiglu_dispatch(x, gate_up_weight, out, limit, clamped,
                                           execution.stream());
     } else {
-        detail::q4_linear_swiglu_dispatch(x, gate_up_weight, out, ws, execution);
+        detail::q4_linear_swiglu_dispatch(x, gate_up_weight, out, policy, ws, execution);
     }
 }
 

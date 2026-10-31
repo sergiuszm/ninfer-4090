@@ -33,7 +33,9 @@ linear_swiglu_workspace_capacity_bytes(QType qtype, std::int32_t gate_up_rows,
  * use their native stored representation. Inputs and weight storage must not overlap out.
  * Writes the entire output and has no persistent state.
  *
- * BF16/Q4/Q8 use A16 under every policy. FP8 permits A8 with AllowA8/AllowA4.
+ * BF16/Q8 use A16 under every policy. FP8 permits A8 with AllowA8/AllowA4. Q4 permits A8 with
+ * AllowA8 only: symmetric group-64 INT8 activation quantization and INT8 contraction at every
+ * positive T, with FP32 cross-group accumulation.
  * NVFP4 permits A4 with AllowA4; A16Only/AllowA8 support only T <= 16 for NVFP4.
  * Otherwise every positive T is admitted. The overload without a policy uses A16Only.
  * Caller workspace covers the complete operation and is scoped to the call.

@@ -2,6 +2,7 @@
 #include "core/weight.h"
 #include "core/arena.h"
 #include "core/device.h"
+#include "ninfer/ops/linear.h"
 
 #include <cuda_runtime.h>
 
@@ -17,8 +18,9 @@ void q8_linear_swiglu_dispatch(const Tensor&, const Weight&, Tensor&, float limi
                                cudaStream_t);
 void launch_q8_swiglu_n2048_k4096(const Tensor&, const Weight&, Tensor&, float limit, bool clamped,
                                   cudaStream_t);
-std::size_t q4_linear_swiglu_capacity_workspace_bytes(int rows, int k, int first, int last);
-void q4_linear_swiglu_dispatch(const Tensor&, const Weight&, Tensor&, MemoryArena&,
+std::size_t q4_linear_swiglu_capacity_workspace_bytes(int rows, int k, LinearPolicy policy,
+                                                      int first, int last);
+void q4_linear_swiglu_dispatch(const Tensor&, const Weight&, Tensor&, LinearPolicy, MemoryArena&,
                                CudaExecutionView);
 void launch_bf16_swiglu_n2048_k4096(const Tensor&, const Weight&, Tensor&, float limit,
                                     bool clamped, cudaStream_t);

@@ -165,6 +165,66 @@ cli.prompt = 'hello'
     }
 }
 
+// Fork-local (PR #15): the Q4/Q5 dense-body prefill activation mode.
+void test_prefill_activations(const Files& files) {
+    using namespace ninfer::product;
+    using ninfer::PrefillActivations;
+    const auto parse_shared = [](EntryPoint entry, std::vector<std::string> arguments) {
+        std::vector<char*> argv;
+        for (auto& argument : arguments) argv.push_back(argument.data());
+        return parse_launch_options(static_cast<int>(argv.size()), argv.data(), entry).launch;
+    };
+    const auto shown = [](const LaunchOptions& launch, EntryPoint entry, std::string_view value,
+                          ConfigSourceKind source) {
+        for (const auto& item : configuration_view(launch, entry).items)
+            if (item.key == "engine.prefill_activations")
+                return std::get<std::string>(item.value) == value && item.source.kind == source;
+        return false;
+    };
+    constexpr EntryPoint kEntries[]{EntryPoint::Cli, EntryPoint::Serve, EntryPoint::Bench,
+                                    EntryPoint::Perplexity};
+    auto path = files.write(R"(
+model.path = 'model.ninfer'
+cli.prompt = 'hello'
+)");
+    for (const auto entry : kEntries) {
+        const auto defaults = parse_shared(entry, {"ninfer", "--config", path.string()});
+        require(defaults.engine.prefill_activations == PrefillActivations::A16 &&
+                    shown(defaults, entry, "a16", ConfigSourceKind::Default),
+                "prefill activations do not default to a16");
+        const auto flag = parse_shared(
+            entry, {"ninfer", "--config", path.string(), "--prefill-activations", "int8"});
+        require(flag.engine.prefill_activations == PrefillActivations::Int8 &&
+                    shown(flag, entry, "int8", ConfigSourceKind::CommandLine),
+                "--prefill-activations int8 or its source was lost");
+    }
+    path = files.write(R"(
+model.path = 'model.ninfer'
+engine.prefill_activations = 'int8'
+cli.prompt = 'hello'
+)");
+    for (const auto entry : kEntries) {
+        const auto file = parse_shared(entry, {"ninfer", "--config", path.string()});
+        require(file.engine.prefill_activations == PrefillActivations::Int8 &&
+                    shown(file, entry, "int8", ConfigSourceKind::File),
+                "file prefill activations or their source were lost");
+        const auto overridden = parse_shared(
+            entry, {"ninfer", "--config", path.string(), "--prefill-activations", "a16"});
+        require(overridden.engine.prefill_activations == PrefillActivations::A16,
+                "command line did not override file prefill activations");
+    }
+    for (const auto* value : {"", "A16", "INT8", "int4", "bf16", "fp8"}) {
+        rejection([&] {
+            serve({"ninfer-serve", "model.ninfer", "--prefill-activations", value});
+        });
+    }
+    path = files.write(R"(
+model.path = 'model.ninfer'
+engine.prefill_activations = 8
+)");
+    rejection([&] { serve({"ninfer-serve", "--config", path.string()}); });
+}
+
 void test_file_merge(const Files& files) {
     const auto path = files.write(R"(
 [model]
@@ -402,6 +462,7 @@ int main() {
         Files files;
         test_arguments();
         test_memory_headroom(files);
+        test_prefill_activations(files);
         test_file_merge(files);
         test_file_errors_and_example(files);
         test_deployment(files);

@@ -20,16 +20,17 @@ void require_rope_axes(const Tensor& positions, const RopeConfig& config) {
 } // namespace
 
 std::size_t attention_projection_workspace_bytes(const AttentionProfile& parameters,
-                                                 std::int32_t first, std::int32_t last) {
-    return ops::linear_split_workspace_capacity_bytes(parameters.projection,
+                                                 BodyActivations activations, std::int32_t first,
+                                                 std::int32_t last) {
+    return ops::linear_split_workspace_capacity_bytes(activations(parameters.projection),
                                                       parameters.projection_rows, first, last);
 }
 
 void attention_projection(const Tensor& hidden, const AttentionParameters& parameters,
-                          Tensor& query, Tensor& gate, Tensor& key, Tensor& value,
-                          MemoryArena& workspace, CudaExecutionView execution) {
+                          BodyActivations activations, Tensor& query, Tensor& gate, Tensor& key,
+                          Tensor& value, MemoryArena& workspace, CudaExecutionView execution) {
     std::array outputs{query, key, gate, value};
-    ops::linear_split(hidden, parameters.projection, outputs, workspace, execution);
+    ops::linear_split(hidden, activations(parameters.projection), outputs, workspace, execution);
 }
 
 void text_rope(const Tensor& positions, const RopeConfig& config, Tensor& query,

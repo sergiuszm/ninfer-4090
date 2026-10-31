@@ -2,8 +2,21 @@
 
 namespace ninfer::ops::detail::linear_split::q4_q5_n7168_n7168_k5120 {
 namespace {
-void launch(const Tensor& x, Weights weights, std::span<const Tensor> outputs, MemoryArena*,
-            cudaStream_t stream) {
+// AllowA8 selects group-64 INT8 activations at every token extent, so a prefill suffix whose
+// width changes with prefix reuse never switches activation precision. AllowA4 keeps A16.
+bool uses_int8(LinearPolicy policy) { return policy == LinearPolicy::AllowA8; }
+
+std::size_t capacity(LinearPolicy policy, std::int32_t, std::int32_t last) {
+    return uses_int8(policy) ? int8_proj_workspace_capacity_bytes(5120, last) : 0;
+}
+
+void launch(const Tensor& x, Weights weights, std::span<const Tensor> outputs,
+            MemoryArena* workspace, cudaStream_t stream) {
+    if (uses_int8(weights.policy)) {
+        const auto scratch = allocate_int8_proj_workspace(*workspace, x.ne[0], x.ne[1]);
+        launch_int8(x, weights.first, *weights.second, outputs, scratch, stream);
+        return;
+    }
     if (x.ne[1] <= 12)
         launch_small(x, weights.first, *weights.second, outputs, stream);
     else
@@ -14,5 +27,6 @@ void launch(const Tensor& x, Weights weights, std::span<const Tensor> outputs, M
 
 namespace ninfer::ops::detail::linear_split {
 const SplitShape kQ4Q5SplitN7168N7168K5120{
-    7168, 5120, kSplitRows<6144, 1024, 6144, 1024>, q4_q5_n7168_n7168_k5120::launch, nullptr, 7168};
+    7168, 5120, kSplitRows<6144, 1024, 6144, 1024>, q4_q5_n7168_n7168_k5120::launch,
+    q4_q5_n7168_n7168_k5120::capacity, 7168};
 } // namespace ninfer::ops::detail::linear_split

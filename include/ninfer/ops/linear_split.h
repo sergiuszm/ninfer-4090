@@ -21,8 +21,9 @@ namespace ninfer::ops {
  * Inputs and weights are preserved. Logical and padded weight dimensions agree.
  *
  * Registered forms include BF16, Q8-G32/FP16, FP8 row-scale, NVFP4 block-scale and
- * paired Q4-G64/FP16 + Q5-G64/FP16. Single-parent activation permissions follow
- * LinearPolicy; paired forms use A16.
+ * paired Q4-G64/FP16 + Q5-G64/FP16. Activation permissions follow LinearPolicy; a paired
+ * form carries one permission for both parents and permits A8 (group-64 INT8 activations)
+ * with AllowA8 only.
  * Workspace is caller-owned, call-scoped and disjoint from all operands. The Op
  * allocates no hidden device memory, owns no persistent state and supports Graph replay.
  */

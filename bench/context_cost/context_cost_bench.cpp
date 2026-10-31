@@ -99,6 +99,7 @@ std::string usage(const char* executable) {
         << "  --device <id>              CUDA device (default: 0)\n"
         << "  --max-context <tokens>     prefill measurement context (default: 8192)\n"
         << "  --prefill-chunk <tokens>   prefill measurement chunk (default: 1024)\n"
+        << "  --prefill-activations <a16|int8> measured prefill activations (default: a16)\n"
         << "  --transfer-warmup <n>      warmups per transfer point (default: 2)\n"
         << "  --transfer-reps <n>        samples per transfer point (default: 9)\n"
         << "  --prefill-reps <n>         samples per prefill point (default: 5)\n"
@@ -141,6 +142,15 @@ Options parse_options(int argc, char** argv) {
         } else if (argument == "--prefill-chunk") {
             options.measurement.prefill_chunk =
                 parse_u32(value("--prefill-chunk"), "--prefill-chunk");
+        } else if (argument == "--prefill-activations") {
+            const std::string_view selected = value("--prefill-activations");
+            if (selected == "a16") {
+                options.measurement.prefill_activations = ninfer::PrefillActivations::A16;
+            } else if (selected == "int8") {
+                options.measurement.prefill_activations = ninfer::PrefillActivations::Int8;
+            } else {
+                throw std::invalid_argument("--prefill-activations must be a16 or int8");
+            }
         } else if (argument == "--transfer-warmup") {
             options.measurement.transfer_warmup =
                 parse_nonnegative_int(value("--transfer-warmup"), "--transfer-warmup");
@@ -403,6 +413,9 @@ int main(int argc, char** argv) {
             report["artifact"] = Json{{"path", artifact->path.string()},
                                       {"canonical_kv_cache", "bf16"},
                                       {"canonical_speculative_backend", "none"},
+                                      {"prefill_activations",
+                                       ninfer::prefill_activations_name(
+                                           options.measurement.prefill_activations)},
                                       {"corpus", options.measurement.corpus.string()}};
         }
         if (transfer_samples && transfer_fits) {
@@ -490,6 +503,8 @@ int main(int argc, char** argv) {
                 provenance["prefill_chunk"]       = options.measurement.prefill_chunk;
                 provenance["max_context"]         = options.measurement.max_context;
                 provenance["prefill_repetitions"] = options.measurement.prefill_repetitions;
+                provenance["prefill_activations"] =
+                    ninfer::prefill_activations_name(options.measurement.prefill_activations);
                 ninfer::runtime::upsert_context_prefill_cost_atomic(
                     options.preset_output,
                     ninfer::runtime::ContextCostIdentity{

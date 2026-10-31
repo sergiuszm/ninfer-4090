@@ -96,7 +96,7 @@ Weights describe_weights(const ProjectionWeights& weights) {
     if (const auto* single = std::get_if<SingleProjectionWeight>(&weights))
         return {single->weight, nullptr, single->policy};
     const auto& pair = std::get<PairedProjectionWeights>(weights);
-    return {pair.first, &pair.second, LinearPolicy::A16Only};
+    return {pair.first, &pair.second, pair.policy};
 }
 
 void validate_interval(std::int32_t first, std::int32_t last) {

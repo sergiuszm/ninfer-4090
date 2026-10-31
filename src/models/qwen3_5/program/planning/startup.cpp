@@ -167,14 +167,15 @@ WorkspaceSpec build_workspace_plan(const SequencePlanImpl& plan) {
                                  std::int32_t batch_size, std::int32_t min_width,
                                  std::int32_t max_width,
                                  ops::CausalAttentionExecutionEnvelope envelope) {
+        const execution::BodyActivations body(profile.options, phase == TextPhase::Prefill);
         for (const auto& block : profile.text.layers) {
             {
                 auto stage = layout.scope();
                 if (const auto* attention =
                         std::get_if<execution::AttentionProfile>(&block.mixer)) {
                     (void)workspace::text_attention_projection(layout, config, last);
-                    scratch(layout, execution::attention_projection_workspace_bytes(*attention,
-                                                                                    first, last));
+                    scratch(layout, execution::attention_projection_workspace_bytes(
+                                        *attention, body, first, last));
                     (void)workspace::text_attention_results(layout, config, last);
                     scratch(layout, ops::causal_softmax_attention_workspace_capacity_bytes(
                                         {dimension(config.attention->head_dim),
@@ -182,7 +183,7 @@ WorkspaceSpec build_workspace_plan(const SequencePlanImpl& plan) {
                                          dimension(config.attention->num_key_value_heads)},
                                         plan.kv_storage, envelope, batch_size, min_width, max_width,
                                         plan.multiprocessor_count));
-                    add_scratch(layout, attention->output, first, last);
+                    add_scratch(layout, body(attention->output), first, last);
                 } else {
                     const auto& gdn = std::get<execution::GdnProfile>(block.mixer);
                     (void)workspace::gdn_control(layout, config, last);
@@ -198,7 +199,7 @@ WorkspaceSpec build_workspace_plan(const SequencePlanImpl& plan) {
                     } else {
                         (void)workspace::gdn_prefill_conv(layout, config, last);
                         scratch(layout,
-                                execution::gdn_projection_workspace_bytes(gdn, first, last));
+                                execution::gdn_projection_workspace_bytes(gdn, body, first, last));
                     }
                     (void)workspace::gdn_recurrent_output(layout, config, last);
                     if (path == GdnWorkspacePath::Prefill) {
@@ -208,14 +209,15 @@ WorkspaceSpec build_workspace_plan(const SequencePlanImpl& plan) {
                                     dimension(config.gdn->linear_num_value_heads), first, last));
                     }
                     (void)workspace::gdn_normalized_output(layout, config, last);
-                    add_scratch(layout, gdn.output, first, last);
+                    add_scratch(layout, body(gdn.output), first, last);
                 }
             }
             auto stage = layout.scope();
             (void)workspace::post_mixer_hidden(layout, config, last);
             if (const auto* dense = std::get_if<execution::DenseProfile>(&block.ffn)) {
-                scratch(layout, execution::dense_mlp_workspace_bytes(*dense, first, last,
-                                                                     execution::DenseMlpUse::Text));
+                scratch(layout,
+                        execution::dense_mlp_workspace_bytes(*dense, first, last,
+                                                             execution::DenseMlpUse::Text, body));
             } else {
                 const auto& p = std::get<execution::MoeLayerProfile>(block.ffn);
                 auto bytes =
@@ -232,7 +234,8 @@ WorkspaceSpec build_workspace_plan(const SequencePlanImpl& plan) {
         linear_scratch(layout, profile.mtp->output, first, last);
         if (const auto* dense = std::get_if<execution::DenseProfile>(&profile.mtp->ffn)) {
             scratch(layout, execution::dense_mlp_workspace_bytes(*dense, first, last,
-                                                                 execution::DenseMlpUse::Mtp));
+                                                                 execution::DenseMlpUse::Mtp,
+                                                                 execution::BodyActivations{}));
         } else {
             scratch(layout, moe::workspace_bytes(
                                 std::get<execution::MoeLayerProfile>(profile.mtp->ffn).math,
@@ -590,6 +593,22 @@ void validate_target_options(const execution::ModelProfile& profile, DeviceConte
     if (options.kv_cache == KvCacheStorage::Fp8E4m3fnGroup128Ue8m0) {
         throw std::invalid_argument(
             "fp8 KV-cache storage requires compute capability 12.0 (block-scaled FP8 MMA)");
+    }
+    // The NVFP4 expert routes use block-scaled E2M1 MMA (sm_120a), which traps on sm_89. The
+    // loader's A16Only policy does not avoid it, so refuse artifacts with NVFP4 experts here.
+    const auto nvfp4_experts = [](const execution::FfnProfile& ffn) {
+        const auto* moe = std::get_if<execution::MoeLayerProfile>(&ffn);
+        if (!moe) return false;
+        const auto& routed = moe->math.routed.ffn;
+        const auto& shared = moe->math.shared;
+        return routed.gate_up_type == QType::NVFP4 || routed.down_type == QType::NVFP4 ||
+               shared.gate_up_type == QType::NVFP4 || shared.down_type == QType::NVFP4;
+    };
+    bool nvfp4 = profile.mtp && nvfp4_experts(profile.mtp->ffn);
+    for (const auto& block : profile.text.layers) nvfp4 = nvfp4 || nvfp4_experts(block.ffn);
+    if (nvfp4) {
+        throw std::invalid_argument(
+            "NVFP4 MoE experts require compute capability 12.0 (block-scaled E2M1 MMA)");
     }
 #else
     if (device.compute_capability() != 120) {

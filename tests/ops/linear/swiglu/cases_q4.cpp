@@ -14,4 +14,10 @@ void ninfer::test::linear_swiglu::add_q4_cases(Suite& suite) {
     };
     add_profile(suite, {QType::Q4_G64_FP16, 34816, 5120, 17408, 1401U, ops::LinearPolicy::A16Only},
                 kTokenCases, std::array<std::int32_t, 7>{7, 25, 49, 128, 152, 168, 1024});
+
+    // Fork-local (PR #15): the INT8 group-64 route under an A8 permission, through the short and
+    // folded schedules and the bounded-workspace token tile (4097).
+    constexpr std::array<std::int32_t, 9> kInt8Tokens{1, 127, 128, 129, 255, 256, 257, 1024, 4097};
+    add_profile(suite, {QType::Q4_G64_FP16, 34816, 5120, 17408, 1401U, ops::LinearPolicy::AllowA8},
+                kInt8Tokens, std::array<std::int32_t, 2>{128, 257});
 }

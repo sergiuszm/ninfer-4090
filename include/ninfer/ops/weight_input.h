@@ -24,7 +24,8 @@ struct WeightInput {
 // Row order is supplied by the calling implementation, for example a Vision Q/K/V bank.
 [[nodiscard]] SingleProjectionWeight prepare_linear_weight(std::span<const WeightInput> rows);
 // Logical row concatenation backed by one or two consecutive native parent regions.
-// Paired regions use A16; the consuming Op owns format/shape/segmentation admission.
+// Paired regions share the permission common to every row; the consuming Op owns
+// format/shape/segmentation admission.
 [[nodiscard]] ProjectionWeights prepare_projection_weights(std::span<const WeightInput> rows);
 [[nodiscard]] ProjectionWeights prepare_gdn_control_proj_weights(const WeightInput& a,
                                                                  const WeightInput& b);

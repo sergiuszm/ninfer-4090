@@ -121,6 +121,8 @@ Json make_report(const Options& options, const RunDescription& run, const Corpus
           {"max_context_tokens", run.engine.max_context},
           {"prefill_chunk_tokens", run.engine.prefill_chunk},
           {"kv_dtype", kv_cache_profile_info(run.engine.kv_cache).name},
+          {"prefill_activations",
+           prefill_activations_name(options.launch.engine.prefill_activations)},
           {"context_pools", product::context_capacity_json(run.engine.context_pools)},
           {"context_token_capacity_estimate", run.engine.context_token_capacity_estimate}}},
         {"timing",
@@ -153,6 +155,8 @@ void write_report(const std::filesystem::path& directory, const Json& report,
     summary << "Perplexity result\nartifact: "
             << report.at("artifact").at("name").get<std::string>()
             << "\nkv: " << execution.at("kv_dtype").get<std::string>()
+            << ", prefill activations: "
+            << execution.at("prefill_activations").get<std::string>()
             << ", corpus: " << report.at("corpus").at("id").get<std::string>() << " / "
             << report.at("corpus").at("mode").get<std::string>()
             << ", context/stride: " << execution.at("context_tokens") << '/'

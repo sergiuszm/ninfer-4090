@@ -35,6 +35,13 @@ detail::LinearAddLaunch select_a16(QType type, int rows, int k, int tokens) {
     }
 }
 
+// AllowA8 selects INT8 for Q5 at every token extent, so a prefill suffix whose width changes
+// with prefix reuse never switches activation precision. AllowA4 keeps A16. The A16 catalogue
+// owns the admitted Q5 shapes for both routes.
+bool q5_int8(QType type, LinearPolicy policy) {
+    return type == QType::Q5_G64_FP16 && policy == LinearPolicy::AllowA8;
+}
+
 void validate_operands(const Tensor& x, const Weight& w, const Tensor& residual,
                        CudaExecutionView execution) {
     if (x.device != execution.device() || w.device != execution.device() ||
@@ -89,7 +96,7 @@ std::size_t linear_add_workspace_capacity_bytes(QType type, std::int32_t rows, s
         return detail::nvfp4_linear_add_workspace_capacity_bytes(rows, k, policy, first, last);
     (void)select_a16(type, rows, k, first);
     (void)select_a16(type, rows, k, last);
-    return 0;
+    return q5_int8(type, policy) ? detail::int8_proj_workspace_capacity_bytes(k, last) : 0;
 }
 
 std::size_t linear_add_workspace_capacity_bytes(QType type, std::int32_t rows, std::int32_t k,
@@ -110,7 +117,11 @@ void linear_add(const Tensor& x, const Weight& w, Tensor& residual, LinearPolicy
     if (w.qtype == QType::NVFP4)
         return detail::nvfp4_linear_add_dispatch(x, w, residual, policy, workspace,
                                                  execution.stream());
-    select_a16(w.qtype, w.n, w.k, x.ne[1])(x, w, residual, execution.stream());
+    const auto a16 = select_a16(w.qtype, w.n, w.k, x.ne[1]);
+    if (!q5_int8(w.qtype, policy)) return a16(x, w, residual, execution.stream());
+    auto scope         = workspace.scope();
+    const auto scratch = detail::allocate_int8_proj_workspace(workspace, w.k, x.ne[1]);
+    detail::q5_linear_add_int8(x, w, residual, scratch, execution.stream());
 }
 
 void linear_add(const Tensor& x, const Weight& w, Tensor& residual, MemoryArena& workspace,

@@ -264,6 +264,29 @@ void logical_data_and_instances() {
             "cross-layer sharing duplicated parent storage");
 }
 
+// Fork-local (PR #15): group-64 INT8 activations for the groupwise formats are a startup choice
+// (LoadOptions::prefill_activations), so a declared permission on a Q4/Q5 Use binds as A16Only.
+// Other formats keep the loader's mapping of the declared permission.
+void groupwise_uses_bind_a16() {
+    ModelFixture fixture;
+    fixture.tensor("down-q5", {128, 24}, QType::Q5_G64_FP16, QuantLayout::RowSplit);
+    fixture.file.root["bindings"]["text/layers/0/mlp/down"] = {{"object", "down-q5"}};
+    fixture.file.root["files"][0]["payload_bytes"]          = fixture.file.payload.size();
+    fixture.file.write();
+    artifact::Reader reader(fixture.file.entry);
+    const auto plan   = q35::read_definition(reader);
+    const auto& dense = std::get<q35::DenseWeights>(plan->weights().text.layers[0].ffn);
+#if defined(NINFER_SM86)
+    constexpr auto declared = ops::LinearPolicy::A16Only;
+#else
+    constexpr auto declared = ops::LinearPolicy::AllowA4;
+#endif
+    require(plan->uses(dense.down)[0].policy == ops::LinearPolicy::A16Only,
+            "a declared permission on a Q5 Use selected INT8 activations");
+    require(plan->uses(dense.gate)[0].policy == declared,
+            "a BF16 Use lost the loader mapping of its declared permission");
+}
+
 void native_uses() {
     const std::array<std::uint64_t, 2> shape{128, 64};
     const auto geometry = weight_geometry(QType::NVFP4, QuantLayout::BlockScaleK16M128x4, shape);
@@ -369,6 +392,7 @@ void cold_matrix_profile() {
 int main() {
     try {
         logical_data_and_instances();
+        groupwise_uses_bind_a16();
         native_uses();
         cold_matrix_profile();
         invalid_model_data();

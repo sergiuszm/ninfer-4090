@@ -12,6 +12,7 @@ void add_two_output_cases(Suite& suite) {
                         {10240, 6144},
                         {{0, 4096}, {4096, 6144}, {10240, 6144}},
                         paired_a16};
+        profile.a8 = {4.0e-2, 2.0e-2, 5.0e-2};
         std::vector<Invocation> calls;
         for (int t : {1,  2,  3,  4,  5,  6,  7,  8,  9,   10,  11,  12,
                       13, 15, 16, 17, 32, 33, 64, 65, 127, 128, 129, 193})
@@ -22,6 +23,19 @@ void add_two_output_cases(Suite& suite) {
                              .input_seed           = 701U,
                              .changed_seed         = 811U,
                              .eager_before_capture = true});
+        // Fork-local (PR #15): the INT8 group-64 route under an A8 permission, at every token
+        // extent and across the 4096-token staging tile.
+        for (int t : {1, 16, 17, 48, 64, 128, 257, 1024, 4097})
+            calls.push_back({.t = t, .policy = Policy::AllowA8, .input_seed = 401U});
+        for (int t : {1, 64, 257})
+            calls.push_back({.t            = t,
+                             .policy       = Policy::AllowA8,
+                             .graph        = true,
+                             .input_seed   = 701U,
+                             .changed_seed = 811U});
+        calls.push_back({.t = 0, .policy = Policy::AllowA8, .workspace_intervals = true});
+        calls.push_back(
+            {.t = 260, .policy = Policy::AllowA8, .input_seed = 7U, .reindex_invariance = true});
         add_profile(suite, profile, std::move(calls));
     }
     for (int k : {2048, 2560}) {

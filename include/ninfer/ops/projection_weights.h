@@ -31,9 +31,10 @@ struct SingleProjectionWeight {
     LinearPolicy policy = LinearPolicy::A16Only;
 };
 
-// The registered paired forms use A16 for both parents.
+// One activation permission covers both parents of the logical row concatenation.
 struct PairedProjectionWeights {
     Weight first, second;
+    LinearPolicy policy = LinearPolicy::A16Only;
 };
 
 using ProjectionWeights = std::variant<SingleProjectionWeight, PairedProjectionWeights>;
@@ -49,7 +50,7 @@ using ProjectionWeights = std::variant<SingleProjectionWeight, PairedProjectionW
         return {linear_profile(*single), {}};
     }
     const auto& pair = std::get<PairedProjectionWeights>(weights);
-    return {linear_profile({pair.first}), linear_profile({pair.second})};
+    return {linear_profile({pair.first, pair.policy}), linear_profile({pair.second, pair.policy})};
 }
 
 } // namespace ninfer::ops

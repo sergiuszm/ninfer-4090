@@ -39,6 +39,11 @@ bool is_sequence(const TextStateUpdate& update) {
     return std::holds_alternative<SequenceUpdate>(update);
 }
 
+// A SequenceUpdate is the prefill pass (prompt prefill and scoring).
+BodyActivations body_activations(const Parameters& parameters, const TextStateUpdate& update) {
+    return {parameters.profile->options, is_sequence(update)};
+}
+
 } // namespace
 
 TextRun::TextRun(TextExecutionView execution, TextInputs inputs, TextStateUpdate update,
@@ -155,7 +160,8 @@ void TextRun::attention(const BlockParameters& block, std::uint32_t compact_laye
     Tensor gate  = projection.gate;
     Tensor key   = projection.key;
     Tensor value = projection.value;
-    attention_projection(normalized, p, query, gate, key, value, work, cuda);
+    const auto body = body_activations(view_.parameters, update_);
+    attention_projection(normalized, p, body, query, gate, key, value, work, cuda);
     query = query.view({dim, heads, tokens});
     gate  = gate.view({dim, heads, tokens});
     key   = key.view({dim, kv, tokens});
@@ -177,8 +183,9 @@ void TextRun::attention(const BlockParameters& block, std::uint32_t compact_laye
         {dim, heads, kv}, static_cast<float>(1.0 / std::sqrt(double(attn.head_dim))),
         view_.cache.batch_layer_view(compact_layer), envelope_, work, ab, cuda);
     ops::sigmoid_mul(gate, a, cuda);
-    ops::linear_add(a.view({dimension(attn.query_width()), tokens}), p.output.weight, residual_,
-                    p.output.policy, work, cuda);
+    const auto output = body(p.output);
+    ops::linear_add(a.view({dimension(attn.query_width()), tokens}), output.weight, residual_,
+                    output.policy, work, cuda);
 }
 
 void TextRun::gdn(const BlockParameters& block, std::uint32_t compact_layer) {
@@ -197,6 +204,7 @@ void TextRun::gdn(const BlockParameters& block, std::uint32_t compact_layer) {
     const auto scale     = static_cast<float>(1.0 / std::sqrt(double(gdn.linear_key_head_dim)));
     const auto* sequence = std::get_if<SequenceUpdate>(&update_);
     const auto* replay   = std::get_if<ReplayRecords>(&update_);
+    const auto body      = body_activations(view_.parameters, update_);
 
     const auto control = workspace::gdn_control(work, cfg, tokens);
     Tensor h           = control.hidden;
@@ -212,7 +220,7 @@ void TextRun::gdn(const BlockParameters& block, std::uint32_t compact_layer) {
     if (sequence) {
         Tensor qkv    = workspace::gdn_prefill_conv(work, cfg, tokens);
         Tensor z_flat = z.view({dimension(gdn.value_width()), tokens});
-        gdn_projection(h, p, qkv, z_flat, work, cuda);
+        gdn_projection(h, p, body, qkv, z_flat, work, cuda);
         Tensor source      = view_.states.conv_tensor(compact_layer, sequence->source_offset);
         Tensor destination = view_.states.conv_tensor(compact_layer, sequence->destination_offset);
         ops::causal_conv1d_silu_split(qkv, p.convolution, source, destination, qc, kc, vc, cuda);
@@ -271,8 +279,9 @@ void TextRun::gdn(const BlockParameters& block, std::uint32_t compact_layer) {
 
     Tensor normalized = workspace::gdn_normalized_output(work, cfg, tokens).view({dv, vh, tokens});
     ops::silu_gated_rmsnorm(o, p.norm, z, cfg.rms_norm_eps, normalized, cuda);
-    ops::linear_add(normalized.view({dimension(gdn.value_width()), tokens}), p.output.weight,
-                    residual_, p.output.policy, work, cuda);
+    const auto output = body(p.output);
+    ops::linear_add(normalized.view({dimension(gdn.value_width()), tokens}), output.weight,
+                    residual_, output.policy, work, cuda);
 }
 
 ops::MoeExecutionHints TextRun::next_projection_hints(std::uint32_t layer) const {
@@ -311,7 +320,8 @@ void TextRun::post_mixer(std::uint32_t layer, const moe::GpuCall* call) {
                  view_.execution);
     if (const auto* dense = std::get_if<DenseParameters>(&block.ffn)) {
         if (call) throw std::invalid_argument("GPU MoE body supplied for a dense layer");
-        dense_mlp(h, *dense, residual_, DenseMlpUse::Text, view_.workspace, view_.execution);
+        dense_mlp(h, *dense, residual_, DenseMlpUse::Text,
+                  body_activations(view_.parameters, update_), view_.workspace, view_.execution);
     } else if (call) {
         (*call)(h, residual_, view_.workspace, next_projection_hints(layer));
     } else {

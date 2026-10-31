@@ -116,7 +116,7 @@ Startup::Calibration Startup::calibrate(const execution::Parameters& parameters,
 
 std::string Startup::prefill_signature(const ExecutionPreparation& preparation,
                                        std::uint32_t chunk) const {
-    return qwen3_5::prefill_signature(*definition_, preparation.experts.get(), chunk);
+    return qwen3_5::prefill_signature(*definition_, *profile, preparation.experts.get(), chunk);
 }
 
 } // namespace ninfer::models::qwen3_5

@@ -47,13 +47,19 @@ std::size_t materialized_bytes(int tokens) {
     (void)allocate_projection(layout, tokens);
     return layout.peak_bytes(1);
 }
+
+// AllowA8 selects group-64 INT8 activations at every token extent, so a prefill suffix whose
+// width changes with prefix reuse never switches activation precision. AllowA4 keeps A16.
+bool uses_int8(LinearPolicy policy) { return policy == LinearPolicy::AllowA8; }
 } // namespace
 
-std::size_t q4_linear_swiglu_capacity_workspace_bytes(int rows, int k, int first, int last) {
+std::size_t q4_linear_swiglu_capacity_workspace_bytes(int rows, int k, LinearPolicy policy,
+                                                      int first, int last) {
     if (first <= 0 || last < first)
         throw std::invalid_argument("q4 linear_swiglu: invalid token interval");
     (void)select_plan(rows, k, first);
     (void)select_plan(rows, k, last);
+    if (uses_int8(policy)) return int8_proj_workspace_capacity_bytes(k, last);
     std::size_t bytes = 0;
     int begin         = 1;
     for (const auto& plan : kPlans) {
@@ -65,9 +71,14 @@ std::size_t q4_linear_swiglu_capacity_workspace_bytes(int rows, int k, int first
     return bytes;
 }
 
-void q4_linear_swiglu_dispatch(const Tensor& x, const Weight& w, Tensor& out,
+void q4_linear_swiglu_dispatch(const Tensor& x, const Weight& w, Tensor& out, LinearPolicy policy,
                                MemoryArena& workspace, CudaExecutionView execution) {
     const auto& plan = select_plan(w.n, w.k, x.ne[1]);
+    if (uses_int8(policy)) {
+        auto scope         = workspace.scope();
+        const auto scratch = allocate_int8_proj_workspace(workspace, w.k, x.ne[1]);
+        return launch_q4_swiglu_int8(x, w, out, scratch, execution.stream());
+    }
     if (!plan.materialized) return plan.launch(x, w, out, execution.stream());
     auto scope   = workspace.scope();
     auto gate_up = allocate_projection(workspace, x.ne[1]);
