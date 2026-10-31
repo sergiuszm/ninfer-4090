@@ -228,6 +228,10 @@ int check_report(const Files& files) {
                             !std::filesystem::exists(directory / "report.json.tmp") &&
                             summary.str().find("ranks: 2") != std::string::npos,
                         "PPL report publication differs from the result");
+    // Fork-local (PR #15): the report names the prefill activation mode.
+    failures += require(report["execution"]["prefill_activations"] == "a16" &&
+                            summary.str().find("prefill activations: a16") != std::string::npos,
+                        "PPL report lost the prefill activation mode");
     return failures;
 }
 
