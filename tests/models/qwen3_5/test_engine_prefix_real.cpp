@@ -67,7 +67,7 @@ ninfer::PrefillActivations prefill_activations_under_test() {
 constexpr auto kUnconstrainedTools = ninfer::ToolConstraintMode::Automatic;
 
 // Fork-local (catch-up #4): while one step runs longer than `after`, print the engine's request
-// counters and context pools every `every`, so a stalled step shows its scheduling state.
+// counters, context metadata and pools every `every`, so a stalled step shows its scheduling state.
 class StallReporter {
 public:
     explicit StallReporter(const ninfer::Engine& engine,
@@ -102,7 +102,10 @@ private:
                       << stats.terminal_pending_requests << " generated " << stats.generated_tokens
                       << " prefill " << stats.computed_prefill_tokens << " root/checkpoint "
                       << stats.root_selections << '/' << stats.checkpoint_selections
-                      << " state_objects " << stats.state_objects << " moves " << stats.state_moves;
+                      << " state_objects " << stats.state_objects << " moves " << stats.state_moves
+                      << " | metadata budget " << stats.context_metadata.budget_bytes
+                      << " allocated " << stats.context_metadata.allocated_bytes << " reserved "
+                      << stats.context_metadata.reserved_bytes;
             for (const auto& pool : stats.context_pools)
                 std::cerr << " | pool " << static_cast<int>(pool.domain) << " capacity "
                           << pool.capacity_bytes << " block " << pool.block_bytes << " live "
