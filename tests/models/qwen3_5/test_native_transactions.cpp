@@ -1,4 +1,5 @@
 #include "core/device.h"
+#include "kv_cache_storage.h"
 #include "models/common/qwen/frontend/frontend.h"
 #include "models/common/qwen/frontend/prepared_prompt.h"
 #include "models/qwen3_5/load.h"
@@ -2014,7 +2015,13 @@ int main(int argc, char** argv) {
         options.max_context              = kCapacity;
         options.prefill_chunk            = kChunk;
         options.max_concurrency          = 2;
-        options.kv_cache                 = KvCacheStorage::Fp8E4m3fnGroup128Ue8m0;
+        // Fork-local (catch-up #4): sm_89 refuses FP8 KV (block-scaled FP8 MMA), so this fixture
+        // runs there with BF16 KV unless NINFER_TEST_KV_DTYPE selects another storage.
+        options.kv_cache = KvCacheStorage::Fp8E4m3fnGroup128Ue8m0;
+        if (const char* storage = std::getenv("NINFER_TEST_KV_DTYPE"); storage && *storage)
+            options.kv_cache = ninfer::test::parse_kv_cache_storage(storage);
+        else if (!ninfer::test::kv_cache_storage_runs_on_target(options.kv_cache))
+            options.kv_cache = KvCacheStorage::BFloat16;
         options.use_cuda_graph           = false;
         options.speculative.backend      = backend;
         options.speculative.draft_tokens = backend == SpeculativeBackend::None ? 0U : 3U;
