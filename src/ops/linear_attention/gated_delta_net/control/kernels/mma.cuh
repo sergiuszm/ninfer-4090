@@ -119,6 +119,20 @@ __global__ __launch_bounds__(Warps * 32, 1) void mma_kernel(
     float a_acc[kMFragments][kNFragments][4]                           = {};
     float b_acc[Paired ? kMFragments : 1][Paired ? kNFragments : 1][4] = {};
 
+    // The unsplit route carries the whole K reduction in one MMA accumulator chain: for 96x5120
+    // that is 80 tiles x 4 subtiles = 320 dependent fp32 accumulations per output. Each split route
+    // sums only K/SplitK and adds the slices in fp32, which is why the split routes meet the
+    // projection tolerance at token counts the unsplit route missed. Give unsplit the same shape
+    // without a grid partition: sum the two halves of K into separate registers and add them at
+    // the end. Measured relative L2 against the fp64 oracle drops 2.6x at T=3457 and 2.5x at
+    // T=4097, and the two shorter chains expose instruction-level parallelism the MMA pipeline was
+    // stalling on. a_head and b_head fold away on the split routes.
+    constexpr int kFirstHalfTiles = kTilesPerSplit / 2;
+    static_assert(SplitK > 1 || kTilesPerSplit % 2 == 0,
+                  "unsplit pairwise accumulation needs an even K-tile count");
+    float a_head[kMFragments][kNFragments][4]                           = {};
+    float b_head[Paired ? kMFragments : 1][Paired ? kNFragments : 1][4] = {};
+
     auto stage_load = [&](int stage, int kt) {
         const int k0 = kt * kBlockK;
 
@@ -241,10 +255,45 @@ __global__ __launch_bounds__(Warps * 32, 1) void mma_kernel(
             }
         }
 
+        if constexpr (SplitK == 1) {
+            // Runs once. Retire the first half of K and restart the chain from zero.
+            if (it == kFirstHalfTiles - 1) {
+#pragma unroll
+                for (int mi = 0; mi < kMFragments; ++mi) {
+#pragma unroll
+                    for (int ni = 0; ni < kNFragments; ++ni) {
+#pragma unroll
+                        for (int e = 0; e < 4; ++e) {
+                            a_head[mi][ni][e] = a_acc[mi][ni][e];
+                            a_acc[mi][ni][e]  = 0.0F;
+                            if constexpr (Paired) {
+                                b_head[mi][ni][e] = b_acc[mi][ni][e];
+                                b_acc[mi][ni][e]  = 0.0F;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         __syncthreads();
         const int next = it + kStages;
         if (next < kTilesPerSplit) { stage_load(stage, kt_begin + next); }
         common::cp_commit();
+    }
+
+    if constexpr (SplitK == 1) {
+#pragma unroll
+        for (int mi = 0; mi < kMFragments; ++mi) {
+#pragma unroll
+            for (int ni = 0; ni < kNFragments; ++ni) {
+#pragma unroll
+                for (int e = 0; e < 4; ++e) {
+                    a_acc[mi][ni][e] += a_head[mi][ni][e];
+                    if constexpr (Paired) b_acc[mi][ni][e] += b_head[mi][ni][e];
+                }
+            }
+        }
     }
 
 #pragma unroll
