@@ -203,6 +203,11 @@ void test_tolerant_tool_calls() {
                  .tolerant_tool_calls,
             "--no-tolerant-tool-calls did not override an earlier flag");
     rejects([] { (void)parse({"ninfer-serve", "model.ninfer", "--tolerant-tool-calls=maybe"}); });
+
+    GenerationRequest request;
+    require(!to_request_options(request, defaults, true).output.tolerant_tool_calls &&
+                to_request_options(request, enabled, true).output.tolerant_tool_calls,
+            "--tolerant-tool-calls did not reach the request output options");
 }
 
 void test_provenance() {
