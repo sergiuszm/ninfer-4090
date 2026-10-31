@@ -2,6 +2,7 @@
 #include "../../../tools/support/paged_kv_fixture.h"
 #include "kv_cache_storage.h"
 #include "ops/float_codec.h"
+#include "ops/fork_cache_reference.h"
 #include "ops/fp8_cache_reference.h"
 #include "ninfer/ops/kv_cache_append.h"
 #include "cuda_fixture.h"
@@ -9,6 +10,7 @@
 #include "ops/op_tester.h"
 #include "core/decode_graph.h"
 #include "core/device.h"
+#include "core/paged_kv_storage.h"
 
 #include <cuda_runtime.h>
 
@@ -69,6 +71,17 @@ TestCacheLayout test_cache_layout(KvCacheStorage storage) {
     case KvCacheStorage::Fp8KeyNvfp4Value:
         return {{DType::FP8_E4M3FN, kFullHeadDim, DType::U8, kFullFp8Groups},
                 {DType::U8, kFullNvfp4CodeBytes, DType::U8, kFullNvfp4Groups}};
+    // Fork-local (rtx4090-port): G64 FP16 scales; INT8, INT4/E8-lattice or E8-root key codes.
+    case KvCacheStorage::RotatedInt8KeyInt4ValueGroup64:
+        return {{DType::I8, kFullHeadDim, DType::FP16, kFullGroups},
+                {DType::U8, kFullHeadDim / 2, DType::FP16, kFullGroups}};
+    case KvCacheStorage::RotatedInt4KeyInt4ValueGroup64:
+    case KvCacheStorage::RK4V4E8:
+        return {{DType::U8, kFullHeadDim / 2, DType::FP16, kFullGroups},
+                {DType::U8, kFullHeadDim / 2, DType::FP16, kFullGroups}};
+    case KvCacheStorage::RK2V4E8:
+        return {{DType::U8, kFullHeadDim / 4, DType::FP16, kFullGroups},
+                {DType::U8, kFullHeadDim / 2, DType::FP16, kFullGroups}};
     }
     throw std::invalid_argument("unsupported test KV storage");
 }
@@ -250,6 +263,68 @@ void encode_full_group(const std::vector<float>& source, std::size_t source_base
     }
     scales[full_cache_index(kFullGroups, group, head, position, physical_page, kv_heads)] =
         scale_bits;
+}
+
+// Fork-local (rtx4090-port): one encoded fork vector from the shared host codec. rk2v4-e8 key
+// codes (E8 root) have no host restatement; their FP16 scales equal the INT4 ones (absmax / 7), so
+// only those code bytes are device-defined.
+struct ForkEncodedVector {
+    std::array<std::uint8_t, kFullHeadDim> codes{};
+    std::array<std::uint16_t, kFullGroups> scales{};
+    bool codes_known = true;
+};
+
+ForkEncodedVector encode_fork_vector(const float* values, KvCacheStorage storage, bool key) {
+    ForkEncodedVector encoded;
+    const bool root_key = key && storage == KvCacheStorage::RK2V4E8;
+    fork_encode_row(values, root_key ? ForkVectorCodec::Int4 : fork_vector_codec(storage, key),
+                    encoded.codes.data(), encoded.scales.data());
+    encoded.codes_known = !root_key;
+    return encoded;
+}
+
+// Writes the expected record bytes of one appended fork row into byte planes [K, V, KS, VS].
+// Device-defined key code rows are recorded by byte offset instead.
+void store_fork_row(KvCacheStorage storage, const TestCacheLayout& layout, const float* k,
+                    const float* v, int head, int position, int page, int kv_heads,
+                    std::array<std::vector<std::uint8_t>, 4>& planes,
+                    std::vector<std::size_t>& device_key_rows) {
+    for (int side = 0; side < 2; ++side) {
+        const auto& vector = side == 0 ? layout.key : layout.value;
+        const auto encoded = encode_fork_vector(side == 0 ? k : v, storage, side == 0);
+        const auto code_offset =
+            full_cache_index(vector.code_extent, 0, head, position, page, kv_heads) *
+            dtype_size(vector.code_dtype);
+        if (encoded.codes_known)
+            std::copy_n(encoded.codes.begin(), vector.code_extent * dtype_size(vector.code_dtype),
+                        planes[side].begin() + static_cast<std::ptrdiff_t>(code_offset));
+        else
+            device_key_rows.push_back(code_offset);
+        const auto scale_offset =
+            full_cache_index(vector.scale_extent, 0, head, position, page, kv_heads) *
+            sizeof(std::uint16_t);
+        std::memcpy(planes[side + 2].data() + scale_offset, encoded.scales.data(),
+                    sizeof(encoded.scales));
+    }
+}
+
+// Device-defined key rows must have been written (not left at the fill byte); their bytes are
+// then adopted, so the exact plane comparison still proves that no other row changed.
+int adopt_device_key_rows(const std::string& label, const std::vector<std::uint8_t>& actual,
+                          std::vector<std::uint8_t>& expected, std::span<const std::size_t> rows,
+                          std::size_t row_bytes) {
+    int failures = 0;
+    for (const auto offset : rows) {
+        const auto first = actual.begin() + static_cast<std::ptrdiff_t>(offset);
+        const auto fill  = expected[offset];
+        if (std::all_of(first, first + static_cast<std::ptrdiff_t>(row_bytes),
+                        [&](std::uint8_t byte) { return byte == fill; })) {
+            std::cerr << label << ": E8 root key row at byte " << offset << " was not written\n";
+            ++failures;
+        }
+        std::copy_n(first, row_bytes, expected.begin() + static_cast<std::ptrdiff_t>(offset));
+    }
+    return failures;
 }
 
 class FullCacheFixture {
@@ -585,6 +660,46 @@ int full_append_case(int kv_heads, KvCacheStorage storage, int tokens = 3) {
                                  expected_scale_v);
         failures += scale_k.verify_guards((label + " k scale guards").c_str());
         failures += scale_v.verify_guards((label + " v scale guards").c_str());
+    } else if (kv_storage_is_fork_mode(storage)) {
+        std::array<GuardedDeviceBuffer*, 4> buffers{&cache_k, &cache_v, &scale_k, &scale_v};
+        std::array<std::vector<std::uint8_t>, 4> expected{
+            std::vector<std::uint8_t>(k_code_count * dtype_size(layout.key.code_dtype), 0x55U),
+            std::vector<std::uint8_t>(v_code_count * dtype_size(layout.value.code_dtype), 0xaaU),
+            std::vector<std::uint8_t>(k_scale_count * sizeof(std::uint16_t), 0x31U),
+            std::vector<std::uint8_t>(v_scale_count * sizeof(std::uint16_t), 0x42U)};
+        for (int plane = 0; plane < 4; ++plane)
+            buffers[plane]->copy_from_host(expected[plane].data(), expected[plane].size());
+        std::vector<std::size_t> device_key_rows;
+        for (int token = 0; token < tokens; ++token) {
+            const int position = positions[static_cast<std::size_t>(token)];
+            const int page     = mapping[static_cast<std::size_t>(position / kPage)];
+            for (int head = 0; head < kv_heads; ++head) {
+                const auto source = full_input_index(0, head, token, kv_heads);
+                store_fork_row(storage, layout, &host_k[source], &host_v[source], head, position,
+                               page, kv_heads, expected, device_key_rows);
+            }
+        }
+        fixture.upload();
+        ops::kv_cache_append(k, v, position_tensor, cache,
+                             ninfer::test::cuda_environment().default_execution);
+        cuda_synchronize();
+        fixture.copy_back();
+        const std::string label = "kv_cache_append full " +
+                                  std::string(kv_cache_storage_name(storage)) +
+                                  " Hkv=" + std::to_string(kv_heads) + " T=" +
+                                  std::to_string(tokens) + " P=" + std::to_string(first_position);
+        for (int plane = 0; plane < 4; ++plane) {
+            const auto actual = from_device<std::uint8_t>(buffers[plane]->data(),
+                                                          expected[plane].size());
+            if (plane == 0)
+                failures += adopt_device_key_rows(
+                    label, actual, expected[0], device_key_rows,
+                    layout.key.code_extent * dtype_size(layout.key.code_dtype));
+            const auto plane_label = label + " plane=" + std::to_string(plane);
+            failures += verify_exact(plane_label.c_str(), actual, expected[plane]);
+        }
+        failures += scale_k.verify_guards((label + " k scale guards").c_str());
+        failures += scale_v.verify_guards((label + " v scale guards").c_str());
     } else {
         std::vector<std::uint8_t> expected_k(k_code_count, 0x55U);
         std::vector<std::uint8_t> expected_v(v_code_count, 0xaaU);
@@ -655,6 +770,7 @@ int full_append_case(int kv_heads, KvCacheStorage storage, int tokens = 3) {
 struct EncodedVector {
     std::array<std::uint8_t, 512> data{};
     std::array<std::uint8_t, 32> scales{};
+    bool codes_known = true; // False for device-defined fork codes (rk2v4-e8 keys).
 };
 
 EncodedVector encode_prefix_vector(std::span<const std::uint16_t, kFullHeadDim> input,
@@ -670,6 +786,13 @@ EncodedVector encode_prefix_vector(std::span<const std::uint16_t, kFullHeadDim> 
     }
     std::array<float, kFullHeadDim> values;
     for (int d = 0; d < kFullHeadDim; ++d) values[d] = bf16_to_f32(input[d]);
+    if (kv_storage_is_fork_mode(storage)) {
+        const auto fork = encode_fork_vector(values.data(), storage, key);
+        std::copy(fork.codes.begin(), fork.codes.end(), encoded.data.begin());
+        std::memcpy(encoded.scales.data(), fork.scales.data(), sizeof(fork.scales));
+        encoded.codes_known = fork.codes_known;
+        return encoded;
+    }
     if (key || storage == KvCacheStorage::Nvfp4Group16 ||
         storage == KvCacheStorage::Fp8KeyNvfp4Value)
         normalized_hadamard_d256_host(values);
@@ -783,6 +906,7 @@ int full_prefix_case(int kv_heads, KvCacheStorage storage, int width, int batch,
     int failures = 0;
     for (int pass = 0; pass < 3; ++pass) {
         std::array<std::vector<std::uint8_t>, 4> expected;
+        std::vector<std::size_t> device_key_rows;
         for (int plane = 0; plane < 4; ++plane) {
             expected[plane].assign(sizes[plane], static_cast<std::uint8_t>(0xa5 + plane));
             if (sizes[plane])
@@ -810,8 +934,11 @@ int full_prefix_case(int kv_heads, KvCacheStorage storage, int width, int batch,
                                                                   position, page, kv_heads) *
                                                  dtype_size(vector.code_dtype);
                         const auto code_bytes = vector.code_extent * dtype_size(vector.code_dtype);
-                        std::copy_n(encoded.data.begin(), code_bytes,
-                                    expected[side].begin() + code_offset);
+                        if (encoded.codes_known)
+                            std::copy_n(encoded.data.begin(), code_bytes,
+                                        expected[side].begin() + code_offset);
+                        else
+                            device_key_rows.push_back(code_offset);
                         if (vector.scale_extent) {
                             const auto scale_offset = full_cache_index(vector.scale_extent, 0, head,
                                                                        position, page, kv_heads) *
@@ -839,12 +966,15 @@ int full_prefix_case(int kv_heads, KvCacheStorage storage, int width, int batch,
         for (int plane = 0; plane < 4; ++plane) {
             if (!sizes[plane]) continue;
             const auto label = "D256 prefix " + std::string(kv_cache_storage_name(storage)) +
-                               " Hkv=" + std::to_string(kv_heads) +
+                               " Hkv=" + std::to_string(kv_heads) + " B=" + std::to_string(batch) +
                                " pass=" + std::to_string(pass) + " plane=" + std::to_string(plane);
-            failures +=
-                verify_exact(label.c_str(),
-                             from_device<std::uint8_t>(storage_buffers[plane].data(), sizes[plane]),
-                             expected[plane]);
+            const auto actual =
+                from_device<std::uint8_t>(storage_buffers[plane].data(), sizes[plane]);
+            if (plane == 0)
+                failures += adopt_device_key_rows(
+                    label, actual, expected[0], device_key_rows,
+                    layout.key.code_extent * dtype_size(layout.key.code_dtype));
+            failures += verify_exact(label.c_str(), actual, expected[plane]);
             failures += storage_buffers[plane].verify_guards(label.c_str());
         }
     }
@@ -865,9 +995,12 @@ int full_prefix_case(int kv_heads, KvCacheStorage storage, int width, int batch,
 } // namespace
 
 void add_full_append_cases(ninfer::test::OpSuite& suite) {
-    for (auto storage : {KvCacheStorage::BFloat16, KvCacheStorage::Int8Group64,
-                         KvCacheStorage::Fp8E4m3fnGroup128Ue8m0, KvCacheStorage::Nvfp4Group16,
-                         KvCacheStorage::Fp8KeyNvfp4Value}) {
+    for (auto storage :
+         {KvCacheStorage::BFloat16, KvCacheStorage::Int8Group64,
+          KvCacheStorage::Fp8E4m3fnGroup128Ue8m0, KvCacheStorage::Nvfp4Group16,
+          KvCacheStorage::Fp8KeyNvfp4Value, KvCacheStorage::RotatedInt8KeyInt4ValueGroup64,
+          KvCacheStorage::RotatedInt4KeyInt4ValueGroup64, KvCacheStorage::RK4V4E8,
+          KvCacheStorage::RK2V4E8}) {
         if (!kv_cache_storage_runs_on_target(storage)) continue;
         const std::string format = kv_cache_storage_name(storage);
         for (int heads : {4, 2})
@@ -884,6 +1017,12 @@ void add_full_append_cases(ninfer::test::OpSuite& suite) {
             suite.add(base + "/w129",
                       [=] { return full_prefix_case(heads, storage, 129, 1, false); },
                       {{"format", format}, {"execution", "eager"}});
+            // Fork-local: MTP history at the production shape (C=2, MTP3) reaches the fork
+            // writer with B>1 through this prefix entry.
+            if (kv_storage_is_fork_mode(storage))
+                suite.add(base + "/b2-w4-graph",
+                          [=] { return full_prefix_case(heads, storage, 4, 2, true); },
+                          {{"format", format}, {"execution", "graph"}});
         }
     }
 }
