@@ -128,16 +128,21 @@ class CompiledChatTemplate {
 public:
     [[nodiscard]] static CompiledChatTemplate
     resolve(std::string_view source, std::string source_name = "chat_template.jinja",
-            nlohmann::ordered_json special_tokens = nlohmann::ordered_json::object());
+            nlohmann::ordered_json special_tokens = nlohmann::ordered_json::object(),
+            bool map_effort_tiers                 = false);
     [[nodiscard]] RenderedChat render(const std::vector<ChatMessage>& messages,
                                       ChatRenderOptions options         = {},
                                       const PreparationControl& control = {}) const;
 
-    explicit CompiledChatTemplate(models::frontend::ChatTemplate compiled)
-        : compiled_(std::move(compiled)) {}
+    // map_effort_tiers: the artifact's own template, whose missing effort tiers the frontend
+    // maps (high and max to xhigh, minimal to low). A --chat-template override gets them as is.
+    explicit CompiledChatTemplate(models::frontend::ChatTemplate compiled,
+                                  bool map_effort_tiers = false)
+        : compiled_(std::move(compiled)), map_effort_tiers_(map_effort_tiers) {}
 
 private:
     models::frontend::ChatTemplate compiled_;
+    bool map_effort_tiers_ = false;
 };
 
 } // namespace ninfer::models::qwen::frontend

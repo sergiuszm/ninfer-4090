@@ -65,7 +65,7 @@ fi::CompiledChatTemplate compile_chat_template(const FrontendResources& resource
                                                const std::filesystem::path& override_path) {
     validate_tokenizer_config(resources);
     return fi::CompiledChatTemplate(
-        models::frontend::load_chat_template(resources.text, override_path));
+        models::frontend::load_chat_template(resources.text, override_path), override_path.empty());
 }
 
 [[noreturn]] void throw_processor_error(const fi::ProcessorError& error) {

@@ -39,7 +39,8 @@ struct ContentSource {
     std::uint32_t reasoning_tag = 0;
 };
 
-Json template_parameters(const ChatRenderOptions& options, const Json& special_tokens) {
+Json template_parameters(const ChatRenderOptions& options, const Json& special_tokens,
+                         bool map_effort_tiers) {
     Json context =
         models::frontend::template_context(options.chat_template_kwargs_json, special_tokens);
     for (const char* name :
@@ -72,12 +73,13 @@ Json template_parameters(const ChatRenderOptions& options, const Json& special_t
             throw std::invalid_argument("invalid reasoning_effort template parameter");
         }
         const bool thinking = effort != "none";
-        // Qwen3.8 templates support only xhigh, medium and low. Map the other public tiers the
-        // way qwen3_8_flash_next.jinja does, so artifact templates without that alias block
-        // (the 27B one) do not reject them.
-        const char* alias = effort == "high" || effort == "max" ? "xhigh"
-                            : effort == "minimal"               ? "low"
-                                                                : nullptr;
+        // Qwen3.8 templates support only xhigh, medium and low. For the artifact's own template,
+        // map the other public tiers the way qwen3_8_flash_next.jinja does, so artifact
+        // templates without that alias block (the 27B one) do not reject them.
+        const char* alias = !map_effort_tiers                       ? nullptr
+                            : effort == "high" || effort == "max" ? "xhigh"
+                            : effort == "minimal"                 ? "low"
+                                                                  : nullptr;
         if (context.contains("enable_thinking") && context["enable_thinking"] != thinking) {
             throw RequestError(RequestErrorKind::ConflictingPromptOptions,
                                "reasoning_effort conflicts with enable_thinking",
@@ -122,9 +124,10 @@ bool ChatMessage::has_media() const noexcept {
 }
 
 CompiledChatTemplate CompiledChatTemplate::resolve(std::string_view source, std::string source_name,
-                                                   Json special_tokens) {
+                                                   Json special_tokens, bool map_effort_tiers) {
     return CompiledChatTemplate({text::JinjaTemplate(std::string(source), std::move(source_name)),
-                                 std::move(special_tokens)});
+                                 std::move(special_tokens)},
+                                map_effort_tiers);
 }
 
 RenderedChat CompiledChatTemplate::render(const std::vector<ChatMessage>& messages,
@@ -134,7 +137,7 @@ RenderedChat CompiledChatTemplate::render(const std::vector<ChatMessage>& messag
     models::frontend::check_preparation_control(control, "chat template");
     const bool continuation =
         options.continuation == PromptContinuationMode::ContinueFinalAssistant;
-    Json context = template_parameters(options, compiled_.special_tokens);
+    Json context = template_parameters(options, compiled_.special_tokens, map_effort_tiers_);
     if (continuation) {
         if (context.value("enable_thinking", false))
             throw RequestError(RequestErrorKind::UnsupportedPromptContinuation,
